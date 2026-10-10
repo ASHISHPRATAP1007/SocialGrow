@@ -1,5 +1,7 @@
 """Meta Graph API: Instagram (Business Discovery — any Business/Creator account) and Facebook Pages (managed pages only)."""
 import re
+import time
+from urllib.parse import urlencode
 
 import httpx
 
@@ -7,6 +9,8 @@ from ..core.lib import ApiError
 from .youtube import _num, title_from
 
 GRAPH = "https://graph.facebook.com/v23.0"
+DIALOG = "https://www.facebook.com/v23.0/dialog/oauth"
+SCOPES = "pages_show_list,pages_read_engagement,instagram_basic,instagram_manage_insights,business_management"
 
 
 def graph_get(path: str, params: dict) -> dict:
@@ -16,6 +20,35 @@ def graph_get(path: str, params: dict) -> dict:
     if r.status_code >= 400 or data.get("error"):
         raise ApiError(f"Meta: {data.get('error', {}).get('message', r.reason_phrase)}")
     return data
+
+
+def oauth_url(app_id: str, redirect_uri: str, state: str) -> str:
+    return f"{DIALOG}?{urlencode({'client_id': app_id, 'redirect_uri': redirect_uri, 'state': state, 'scope': SCOPES, 'response_type': 'code'})}"
+
+
+def exchange_code(app_id: str, app_secret: str, redirect_uri: str, code: str) -> str:
+    return graph_get("oauth/access_token", {"client_id": app_id, "client_secret": app_secret, "redirect_uri": redirect_uri, "code": code})["access_token"]
+
+
+def long_lived(app_id: str, app_secret: str, token: str) -> tuple[str, int]:
+    ex = graph_get("oauth/access_token", {"grant_type": "fb_exchange_token", "client_id": app_id, "client_secret": app_secret, "fb_exchange_token": token})
+    return ex["access_token"], int(time.time() * 1000) + int(ex.get("expires_in") or 60 * 86400) * 1000
+
+
+def discover(token: str) -> dict:
+    """Pages the token manages, with their own Page tokens (non-expiring when the user token is long-lived)
+    and the linked Instagram Business account."""
+    pages = graph_get("me/accounts", {"fields": "id,name,username,access_token,instagram_business_account{id,username}",
+                                      "limit": "100", "access_token": token}).get("data", [])
+    page_tokens = {}
+    for p in pages:
+        ig = p.get("instagram_business_account") or {}
+        page_tokens[p["id"]] = {"name": p["name"], "username": p.get("username"), "token": p.get("access_token"),
+                                "igId": ig.get("id"), "igUsername": ig.get("username")}
+    with_ig = next((v for v in page_tokens.values() if v["igId"]), None)
+    return {"pages": [p["name"] for p in pages], "pageTokens": page_tokens,
+            "igId": with_ig["igId"] if with_ig else None, "igUsername": with_ig["igUsername"] if with_ig else None,
+            "igToken": with_ig["token"] if with_ig else None}
 
 
 def fetch_instagram(raw: str, ig_business_id: str, token: str) -> dict:
@@ -44,20 +77,24 @@ def fetch_instagram(raw: str, ig_business_id: str, token: str) -> dict:
     }
 
 
-def fetch_facebook(raw: str, token: str) -> dict:
+def _find_page(raw: str, page_tokens: dict) -> tuple[str, dict]:
     want = re.sub(r"^@", "", re.sub(r"[/?].*$", "", re.sub(r"^.*facebook\.com/", "", raw.strip()))).lower()
-    pages = graph_get("me/accounts", {"fields": "id,name,username,access_token", "limit": "100", "access_token": token}).get("data", [])
-    page = next((p for p in pages if p["id"] == want or (p.get("username") or "").lower() == want or p["name"].lower() == want), None)
-    if not page:
-        names = ", ".join(p["name"] for p in pages) or "koi nahi"
-        raise ApiError(f"Ye Page aapke Meta token se managed nahi hai. Available pages: {names}")
-    info = graph_get(page["id"], {
+    for pid, p in page_tokens.items():
+        if pid == want or (p.get("username") or "").lower() == want or p["name"].lower() == want:
+            return pid, p
+    names = ", ".join(p["name"] for p in page_tokens.values()) or "koi nahi"
+    raise ApiError(f"Ye Page aapke connected Facebook account se managed nahi hai. Available pages: {names}")
+
+
+def fetch_facebook(raw: str, page_tokens: dict) -> dict:
+    page_id, page = _find_page(raw, page_tokens)
+    info = graph_get(page_id, {
         "fields": "name,username,fan_count,followers_count,posts.limit(30){id,message,created_time,permalink_url,shares,"
                   "reactions.summary(total_count).limit(0),comments.summary(total_count).limit(0)}",
-        "access_token": page["access_token"],
+        "access_token": page["token"],
     })
     return {
-        "externalId": page["id"], "username": info.get("username") or page.get("username") or page["name"], "displayName": info["name"],
+        "externalId": page_id, "username": info.get("username") or page.get("username") or page["name"], "displayName": info["name"],
         "followers": _num(info.get("followers_count") or info.get("fan_count")), "following": 0,
         "posts": [{
             "externalId": p["id"], "title": title_from(p.get("message"), "Facebook post"), "format": "Post",

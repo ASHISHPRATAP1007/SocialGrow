@@ -1,7 +1,8 @@
 'use client'
 
-import { useState } from 'react'
+import { Suspense, useEffect, useState } from 'react'
 import Link from 'next/link'
+import { useRouter, useSearchParams } from 'next/navigation'
 import { toast } from 'sonner'
 import { api, refreshAll } from '@/lib/api'
 import { Button } from '@/components/ui/button'
@@ -9,7 +10,37 @@ import { Input } from '@/components/ui/input'
 import { Field, PageHeader, Panel, can, errMsg, useMe } from '@/components/sg'
 import { IntegrationsPanel } from '@/components/integrations-panel'
 
+const META_RESULT = {
+  connected: ['success', 'Facebook connect ho gaya — ab Social Accounts se apne Pages jodiye.'],
+  cancelled: ['error', 'Facebook connect cancel ho gaya.'],
+  error: ['error', 'Facebook connect nahi ho paya. Dobara try karein.'],
+}
+
+/** Shows the result after returning from "Connect with Facebook", then cleans the URL. */
+function MetaResult() {
+  const params = useSearchParams()
+  const router = useRouter()
+  const result = params.get('meta')
+  useEffect(() => {
+    if (!result || !META_RESULT[result]) return
+    const [kind, text] = META_RESULT[result]
+    toast[kind](text)
+    refreshAll()
+    router.replace('/settings')
+  }, [result, router])
+  return null
+}
+
 export default function SettingsPage() {
+  return (
+    <Suspense fallback={null}>
+      <MetaResult />
+      <SettingsForm />
+    </Suspense>
+  )
+}
+
+function SettingsForm() {
   const me = useMe()
   const a = me.agency
   const [f, setF] = useState({

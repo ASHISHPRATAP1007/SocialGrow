@@ -232,7 +232,71 @@ class Api(unittest.TestCase):
         self.assertFalse(st["meta"]["facebookReady"])
         project = self.get("/projects", self.agency).json()[0]["id"]
         r = self.post("/accounts/live", self.agency, {"projectId": project, "platform": "facebook", "handle": "SocialGrow"})
-        self.assertIn("apna Meta token", r.json()["detail"])
+        self.assertIn("Connect with Facebook", r.json()["detail"])
+
+    def test_61_one_time_owner_meta_setup_then_agencies_need_nothing(self):
+        fake_info = {"pages": ["SocialGrow"], "igId": "17841400000000001", "igUsername": "socialgrow.ashish", "igToken": "PAGE_TOKEN_1",
+                     "pageTokens": {"111": {"name": "SocialGrow", "username": "socialgrow", "token": "PAGE_TOKEN_1",
+                                            "igId": "17841400000000001", "igUsername": "socialgrow.ashish"}}}
+        with mock.patch("app.routers.integrations.long_lived", return_value=("LONG_USER_TOKEN", int(time.time() * 1000) + 60 * DAY)), \
+             mock.patch("app.routers.integrations.discover", return_value=fake_info):
+            r = self.post("/integrations/meta", self.owner, {"token": "EAAshort", "appId": "123456", "appSecret": "s3cret"})
+        self.assertEqual(r.status_code, 200, r.text)
+        self.assertTrue(r.json()["neverExpires"])
+        owner_st = self.get("/integrations/status", self.owner).json()
+        self.assertTrue(owner_st["shared"]["isPlatformOwner"])
+        self.assertTrue(owner_st["meta"]["neverExpires"])
+        self.assertIsNone(owner_st["meta"]["expiresAt"])
+        self.assertTrue(owner_st["meta"]["redirectUri"].endswith("/api/v1/integrations/meta/callback"))
+        # any agency: Instagram ready + one-click Facebook available, with zero setup of their own
+        st = self.get("/integrations/status", self.agency).json()
+        self.assertTrue(st["meta"]["instagramReady"])
+        self.assertTrue(st["meta"]["oauthAvailable"])
+        self.assertIsNone(st["meta"]["redirectUri"])
+        self.assertNotIn("s3cret", json.dumps(st))
+        # the shared Instagram connection uses the non-expiring Page token, not the 60-day user token
+        from app.services.sync_service import resolve
+        with SessionLocal() as db:
+            integ = resolve(db, self._agency_id(self.agency))
+        self.assertEqual(integ["igToken"], "PAGE_TOKEN_1")
+        self.assertIsNone(integ["igExpiresAt"])
+        self.assertEqual(integ["ownPageTokens"], {})  # agency can't use the owner's Facebook pages
+
+    def test_62_agency_one_click_facebook_oauth(self):
+        url = self.get("/integrations/meta/connect-url", self.agency).json()["url"]
+        self.assertIn("client_id=123456", url)
+        state = url.split("state=")[1].split("&")[0]
+        bad = self.client.get(f"{API}/integrations/meta/callback?code=x&state=forged", follow_redirects=False)
+        self.assertIn("meta=error", bad.headers["location"])
+        agency_pages = {"pages": ["Sharma Clinic"], "igId": None, "igUsername": None, "igToken": None,
+                        "pageTokens": {"222": {"name": "Sharma Clinic", "username": "sharmaclinic", "token": "PAGE_TOKEN_2", "igId": None, "igUsername": None}}}
+        with mock.patch("app.routers.integrations.exchange_code", return_value="short"), \
+             mock.patch("app.routers.integrations.long_lived", return_value=("LONG2", int(time.time() * 1000) + 60 * DAY)), \
+             mock.patch("app.routers.integrations.discover", return_value=agency_pages):
+            ok = self.client.get(f"{API}/integrations/meta/callback?code=abc&state={state}", follow_redirects=False)
+        self.assertTrue(ok.headers["location"].endswith("/settings?meta=connected"))
+        st = self.get("/integrations/status", self.agency).json()
+        self.assertTrue(st["meta"]["facebookReady"])
+        self.assertTrue(st["meta"]["neverExpires"])
+        self.assertTrue(st["meta"]["instagramReady"])  # still shared from the owner
+        from app.services.sync_service import resolve
+        with SessionLocal() as db:
+            self.assertIn("222", resolve(db, self._agency_id(self.agency))["ownPageTokens"])
+        # viewer (not admin) cannot start the connect flow
+        viewer = self.client.post(f"{API}/auth/login", json={"email": "viewer@test.dev", "password": PW}).json()["accessToken"]
+        self.assertEqual(self.get("/integrations/meta/connect-url", {"Authorization": f"Bearer {viewer}"}).status_code, 403)
+
+    def test_63_schema_self_updates_on_deploy(self):
+        from sqlalchemy import create_engine, inspect, text
+        import app.database as database
+        old = create_engine(f"sqlite:///{os.path.join(tempfile.mkdtemp(), 'old.db')}")
+        with old.begin() as c:
+            c.execute(text('CREATE TABLE integrations (id VARCHAR(32) PRIMARY KEY, agency_id VARCHAR(32), updated_at BIGINT)'))
+        with mock.patch.object(database, "engine", old):
+            database._add_missing_columns()
+        cols = {c["name"] for c in inspect(old).get_columns("integrations")}
+        self.assertIn("meta_page_tokens", cols)
+        self.assertIn("youtube_api_key", cols)
 
     def test_70_cron_endpoint_requires_secret(self):
         self.assertEqual(self.client.post(f"{API}/cron/run?task=daily").status_code, 401)

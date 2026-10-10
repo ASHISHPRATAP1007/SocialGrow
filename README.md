@@ -39,7 +39,7 @@ uvicorn app.main:app --reload --port 8000
 
 - `DATABASE_URL` khaali chhodo → local `socialgrow.db` (SQLite) file ban jayegi.
 - API docs: http://localhost:8000/docs
-- Tests: `pytest -q` (14 tests)
+- Tests: `pytest -q` (17 tests)
 
 ### Frontend
 
@@ -65,7 +65,7 @@ Browser: http://localhost:3000 → **"Naya account"** se pehla account banao (ye
 | Cron | **cron-job.org** — backend ko jagaye rakhna + jobs | Free |
 
 ### Step A — Code GitHub par
-GitHub par naya repo banao (jaise `socialgrow-ai`) aur ye poora folder push karo.
+Code already yahan hai: https://github.com/ASHISHPRATAP1007/SocialGrow
 
 ### Step B — Neon database
 1. neon.tech → Sign up → **New Project** (region: Singapore / Mumbai ke paas wala).
@@ -100,15 +100,29 @@ Render free plan idle hone par so jata hai, isliye cron-job.org par 2 jobs banao
 
 ---
 
-## 3. Real data aur payments jodna (app ke andar se)
+## 3. Owner ka ONE-TIME setup (iske baad kuch update nahi karna)
 
-Sab kuch app ke **Settings** aur **Admin Panel** se hota hai — code badalne ki zarurat nahi.
+Sab kuch app ke **Settings** aur **Admin Panel** se hota hai — code badalne ki zarurat nahi. Ye **sirf ek baar** karna hai:
 
-1. **YouTube** — Owner account → Settings → Integrations → YouTube API key (Google Cloud se free). Ye key **saari agencies ke liye** kaam karti hai.
-2. **Instagram** — Owner account → Settings → Meta: App ID + App Secret + User Access Token (60 din valid, expiry se pehle reminder). Saari agencies kisi bhi Business/Creator Instagram ko jod sakti hain.
-3. **Facebook Pages** — har agency apna khud ka Meta token jodti hai (security: koi doosre ka Page nahi padh sakta).
-4. **Razorpay (auto-renew)** — Admin Panel → Razorpay: Key ID, Key Secret, Webhook Secret. Webhook URL wahi dikhta hai — use Razorpay Dashboard → Settings → Webhooks mein daalo (events: `subscription.*`). Pehle **Test mode** keys se try karo.
-5. **UPI fallback** — Razorpay set hone tak Admin Panel mein apni UPI ID daalo; agencies QR se pay karke UTR daalengi, aap verify karoge.
+| # | Kahan | Kya | Kabhi expire? |
+|---|---|---|---|
+| 1 | Settings → Integrations | **YouTube API key** (Google Cloud, free) | Nahi |
+| 2 | Settings → Integrations | **Meta App ID + App Secret + apna token** (Graph API Explorer) | Nahi — app Page token use karta hai |
+| 3 | developers.facebook.com → App → Facebook Login → Settings | Settings page par dikha **Redirect URI** "Valid OAuth Redirect URIs" mein daalo | — |
+| 4 | Admin Panel → Razorpay | **Key ID + Key Secret + Webhook Secret**; Admin Panel ka Webhook URL Razorpay Dashboard → Webhooks mein (events `subscription.*`) | Nahi |
+| 5 | cron-job.org | 2 jobs (Section 2, Step G) | Nahi |
+
+**Iske baad sab automatic:**
+- Nayi agency signup → **turant 30 din trial** (koi approval nahi).
+- Har agency ko **YouTube + Instagram live data** bina kisi setup ke.
+- **Facebook Pages:** agency Settings mein **"Connect with Facebook"** dabati hai → Facebook login → apne Pages chunti hai. Token kabhi expire nahi hota.
+- **Payment:** Razorpay se subscribe → har mahine / saal **auto-renew** → webhook se plan apne aap update. Fail hone par retry, reminder, 3 din grace, phir read-only.
+- **Sync** har 6 ghante, **reminders** roz — sab apne aap.
+- **Naya code deploy** karne par database apne aap update hota hai (naye columns khud ban jaate hain).
+
+> **Meta App Live mode (ek baar):** jab tak Meta App "Development" mode mein hai, "Connect with Facebook" sirf un logon ke liye chalega jo App Roles mein added hain. Sab agencies ke liye: developers.facebook.com → App → **App Review** mein `pages_show_list`, `pages_read_engagement` ke liye Advanced Access request karo, Privacy Policy URL daalo, aur App ko **Live** karo. YouTube aur Instagram iske bina bhi sab agencies ke liye chalte hain.
+
+**UPI fallback (optional):** Razorpay set hone tak Admin Panel mein UPI ID daal sakte ho — tab payment manually verify karne padte hain. Razorpay set hote hi ye apne aap chhup jaata hai.
 
 ## 4. Security notes
 

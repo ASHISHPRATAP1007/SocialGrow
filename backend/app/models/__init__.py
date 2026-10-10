@@ -263,6 +263,9 @@ class PlatformSettings(Base):
     razorpay_key_secret: Mapped[str | None] = mapped_column(String(128), nullable=True)
     razorpay_webhook_secret: Mapped[str | None] = mapped_column(String(128), nullable=True)
     razorpay_plans: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    # Owner's Meta App (one-time) — powers "Connect with Facebook" for every agency
+    meta_app_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    meta_app_secret: Mapped[str | None] = mapped_column(String(128), nullable=True)
     updated_at: Mapped[int] = mapped_column(BigInteger, default=now_ms)
 
 
@@ -277,6 +280,9 @@ class Integration(Base):
     ig_business_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
     ig_username: Mapped[str | None] = mapped_column(String(128), nullable=True)
     meta_pages: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    # {page_id: {"name", "token", "username", "igId", "igUsername"}} — Page tokens from a long-lived
+    # user token do not expire, so nobody has to paste a new token every 60 days.
+    meta_page_tokens: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     updated_at: Mapped[int] = mapped_column(BigInteger, default=now_ms)
 
 

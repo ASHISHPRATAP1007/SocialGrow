@@ -42,7 +42,8 @@ def daily_checks(db: Session) -> None:
             notify(db, a.id, "billing", "🔒 Trial/subscription khatam. Aapka data safe hai — Billing se payment karke turant wapas shuru karein.")
 
     for i in db.scalars(select(Integration)).all():
-        if i.meta_token_expires_at:
+        # Page tokens never expire — only warn for old-style setups without them
+        if i.meta_token_expires_at and not any(p.get("token") for p in (i.meta_page_tokens or {}).values()):
             left = math.ceil((i.meta_token_expires_at - epoch_ms()) / DAY)
             if left in (7, 2):
                 notify(db, i.agency_id, "account", f"🔑 Meta (Instagram/Facebook) token {left} din mein expire hoga. Settings → Integrations mein naya token daalein.")

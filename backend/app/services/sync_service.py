@@ -25,17 +25,35 @@ def platform_integration(db: Session) -> Integration | None:
     return None
 
 
+def ig_credentials(row: Integration | None) -> tuple[str | None, str | None, int | None]:
+    """(ig business id, token, expiry). Prefers the non-expiring Page token of the page linked to Instagram."""
+    if not row or not row.ig_business_id:
+        return None, None, None
+    for p in (row.meta_page_tokens or {}).values():
+        if p.get("igId") == row.ig_business_id and p.get("token"):
+            return row.ig_business_id, p["token"], None
+    if row.meta_access_token:
+        return row.ig_business_id, row.meta_access_token, row.meta_token_expires_at
+    return None, None, None
+
+
+def ig_valid(row: Integration | None) -> bool:
+    ig_id, token, exp = ig_credentials(row)
+    return bool(ig_id and token and (not exp or exp > epoch_ms()))
+
+
 def resolve(db: Session, agency_id: str) -> dict:
     own = db.scalar(select(Integration).where(Integration.agency_id == agency_id))
     shared = platform_integration(db)
-    ig = own if own and own.meta_access_token and own.ig_business_id else shared if shared and shared.meta_access_token and shared.ig_business_id else None
+    ig_row = own if ig_valid(own) else shared if ig_valid(shared) else None
+    ig_id, ig_token, ig_exp = ig_credentials(ig_row)
+    page_tokens = (own.meta_page_tokens if own else None) or {}
     return {
         "youtubeApiKey": (own and own.youtube_api_key) or (shared and shared.youtube_api_key) or None,
-        "igToken": ig.meta_access_token if ig else None,
-        "igBusinessId": ig.ig_business_id if ig else None,
-        "igExpiresAt": ig.meta_token_expires_at if ig else None,
-        "ownMetaToken": own.meta_access_token if own else None,
-        "ownMetaExpiresAt": own.meta_token_expires_at if own else None,
+        "igToken": ig_token,
+        "igBusinessId": ig_id,
+        "igExpiresAt": ig_exp,
+        "ownPageTokens": {k: v for k, v in page_tokens.items() if v.get("token")},
     }
 
 
@@ -50,11 +68,9 @@ def fetch_for(platform: str, handle: str, integ: dict) -> dict:
         if integ["igExpiresAt"] and integ["igExpiresAt"] < epoch_ms():
             raise ApiError("Instagram connection refresh ho raha hai, thodi der baad try karein.")
         return fetch_instagram(handle, integ["igBusinessId"], integ["igToken"])
-    if not integ["ownMetaToken"]:
-        raise ApiError("Facebook Page jodne ke liye Settings → Integrations mein apna Meta token connect karein (sirf apne Pages ke liye).")
-    if integ["ownMetaExpiresAt"] and integ["ownMetaExpiresAt"] < epoch_ms():
-        raise ApiError("Meta token expire ho gaya. Settings mein naya token daalein.")
-    return fetch_facebook(handle, integ["ownMetaToken"])
+    if not integ["ownPageTokens"]:
+        raise ApiError("Facebook Page jodne ke liye Settings → Integrations mein 'Connect with Facebook' dabayein (sirf apne Pages ke liye).")
+    return fetch_facebook(handle, integ["ownPageTokens"])
 
 
 def apply_sync(db: Session, agency_id: str, data: dict, account: SocialAccount | None = None,
