@@ -6,8 +6,9 @@ import re
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from ..core.lib import ApiError, epoch_ms, notify, today_iso
-from ..models import Integration, Member, MetricDaily, PlatformAdmin, Post, Project, SocialAccount
+from ..core.lib import ApiError, days_ago, epoch_ms, notify, today_iso
+from ..models import Client, Integration, Member, MetricDaily, PlatformAdmin, PlatformSettings, Post, Project, SocialAccount
+from .google import access_token as google_access_token
 from .meta import fetch_facebook, fetch_instagram
 from .youtube import fetch_youtube
 
@@ -48,7 +49,10 @@ def resolve(db: Session, agency_id: str) -> dict:
     ig_row = own if ig_valid(own) else shared if ig_valid(shared) else None
     ig_id, ig_token, ig_exp = ig_credentials(ig_row)
     page_tokens = (own.meta_page_tokens if own else None) or {}
+    ps = db.scalar(select(PlatformSettings))
     return {
+        "googleChannels": (own.google_channels if own else None) or {},
+        "googleApp": (ps.google_client_id, ps.google_client_secret) if ps and ps.google_client_id and ps.google_client_secret else None,
         "youtubeApiKey": (own and own.youtube_api_key) or (shared and shared.youtube_api_key) or None,
         "igToken": ig_token,
         "igBusinessId": ig_id,
@@ -59,6 +63,10 @@ def resolve(db: Session, agency_id: str) -> dict:
 
 def fetch_for(platform: str, handle: str, integ: dict) -> dict:
     if platform == "youtube":
+        own = integ.get("googleChannels", {}).get(handle)
+        if own and own.get("refreshToken") and integ.get("googleApp"):
+            # Channel connected with "Connect with Google" — uses its own login, no API key needed
+            return fetch_youtube(handle, "oauth:" + google_access_token(*integ["googleApp"], own["refreshToken"]))
         if not integ["youtubeApiKey"]:
             raise ApiError("YouTube live data abhi available nahi hai. Support se contact karein.")
         return fetch_youtube(handle, integ["youtubeApiKey"])
@@ -178,3 +186,70 @@ def sync_all(db: Session) -> int:
         if err:
             log.warning("sync failed for %s: %s", acc.id, err)
     return len(accounts)
+
+
+# ---------------- auto-add accounts after "Connect with Facebook / Google" ----------------
+
+def ensure_project(db: Session, agency_id: str, client_id: str) -> Project:
+    """Accounts belong to a project; use the client's first active project or create one."""
+    client = db.get(Client, client_id)
+    if not client or client.agency_id != agency_id:
+        raise ApiError("Client nahi mila.")
+    project = db.scalar(select(Project).where(Project.client_id == client_id, Project.status == "active").order_by(Project.created_at))
+    if not project:
+        project = Project(agency_id=agency_id, client_id=client_id, name=f"{client.name} — Social Media", platforms=[],
+                          start_date=today_iso(), end_date=days_ago(-365), status="active")
+        db.add(project)
+        db.flush()
+    return project
+
+
+def available_items(db: Session, agency_id: str) -> list[dict]:
+    """Pages / Instagram / YouTube channels the agency has logged in to but not yet added as accounts."""
+    row = db.scalar(select(Integration).where(Integration.agency_id == agency_id))
+    if not row:
+        return []
+    existing = {(a.platform, a.external_id) for a in db.scalars(select(SocialAccount).where(SocialAccount.agency_id == agency_id)).all()}
+    out = []
+    for pid, p in (row.meta_page_tokens or {}).items():
+        if not p.get("token"):
+            continue
+        if ("facebook", pid) not in existing:
+            out.append({"platform": "facebook", "id": pid, "name": p["name"], "username": p.get("username")})
+        if p.get("igId") and ("instagram", p["igId"]) not in existing:
+            out.append({"platform": "instagram", "id": p["igId"], "name": p.get("igUsername") or p["name"], "username": p.get("igUsername")})
+    for cid, c in (row.google_channels or {}).items():
+        if ("youtube", cid) not in existing:
+            out.append({"platform": "youtube", "id": cid, "name": c["title"], "username": c.get("handle")})
+    return out
+
+
+def _handle_for(item: dict) -> str:
+    return item["username"] if item["platform"] == "instagram" else item["id"]
+
+
+def add_items(db: Session, agency_id: str, client_id: str, items: list[dict]) -> dict:
+    """Adds the given connected items as LIVE accounts under the client (first sync included).
+    Already-added accounts are skipped (and revived if they needed a reconnect)."""
+    project = ensure_project(db, agency_id, client_id)
+    project_id = project.id
+    db.commit()
+    added, errors = [], []
+    for it in items:
+        dup = db.scalar(select(SocialAccount).where(SocialAccount.agency_id == agency_id, SocialAccount.platform == it["platform"],
+                                                    SocialAccount.external_id == it["id"]))
+        if dup:
+            if dup.status == "needs_reconnect":
+                dup.status, dup.sync_error = "connected", None
+                db.commit()
+            continue
+        try:
+            if it["platform"] == "instagram" and not it.get("username"):
+                raise ApiError("Instagram username nahi mila.")
+            data = fetch_for(it["platform"], _handle_for(it), resolve(db, agency_id))
+            apply_sync(db, agency_id, data, create=(project_id, it["platform"]))
+            added.append({"platform": it["platform"], "username": data["username"]})
+        except Exception as e:  # one failing page must not block the rest
+            db.rollback()
+            errors.append({"platform": it["platform"], "name": it["name"], "error": e.detail if isinstance(e, ApiError) else str(e)})
+    return {"added": added, "errors": errors}

@@ -266,6 +266,9 @@ class PlatformSettings(Base):
     # Owner's Meta App (one-time) — powers "Connect with Facebook" for every agency
     meta_app_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
     meta_app_secret: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    # Google OAuth app (one-time owner setup) — agencies/clients "Connect with Google" for YouTube
+    google_client_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    google_client_secret: Mapped[str | None] = mapped_column(String(128), nullable=True)
     updated_at: Mapped[int] = mapped_column(BigInteger, default=now_ms)
 
 
@@ -283,6 +286,8 @@ class Integration(Base):
     # {page_id: {"name", "token", "username", "igId", "igUsername"}} — Page tokens from a long-lived
     # user token do not expire, so nobody has to paste a new token every 60 days.
     meta_page_tokens: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    # {channel_id: {"title", "handle", "refreshToken"}} — YouTube channels connected with "Connect with Google"
+    google_channels: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     updated_at: Mapped[int] = mapped_column(BigInteger, default=now_ms)
 
 
@@ -290,3 +295,18 @@ class PlatformAdmin(Base):
     __tablename__ = "platform_admins"
     id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
     user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), unique=True)
+
+
+class ConnectLink(Base):
+    """A shareable link an agency sends to its client: the client logs in with Facebook / Google
+    (no SocialGrow account needed) and the accounts are added under that client automatically."""
+    __tablename__ = "connect_links"
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
+    token: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    agency_id: Mapped[str] = mapped_column(ForeignKey("agencies.id", ondelete="CASCADE"), index=True)
+    client_id: Mapped[str] = mapped_column(ForeignKey("clients.id", ondelete="CASCADE"), index=True)
+    created_by: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    expires_at: Mapped[int] = mapped_column(BigInteger)
+    uses: Mapped[int] = mapped_column(Integer, default=0)
+    last_used_at: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    created_at: Mapped[int] = mapped_column(BigInteger, default=now_ms)

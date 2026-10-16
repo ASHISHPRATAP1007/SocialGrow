@@ -267,14 +267,14 @@ class Api(unittest.TestCase):
         self.assertIn("client_id=123456", url)
         state = url.split("state=")[1].split("&")[0]
         bad = self.client.get(f"{API}/integrations/meta/callback?code=x&state=forged", follow_redirects=False)
-        self.assertIn("meta=error", bad.headers["location"])
+        self.assertIn("oauth=error", bad.headers["location"])
         agency_pages = {"pages": ["Sharma Clinic"], "igId": None, "igUsername": None, "igToken": None,
                         "pageTokens": {"222": {"name": "Sharma Clinic", "username": "sharmaclinic", "token": "PAGE_TOKEN_2", "igId": None, "igUsername": None}}}
         with mock.patch("app.routers.integrations.exchange_code", return_value="short"), \
              mock.patch("app.routers.integrations.long_lived", return_value=("LONG2", int(time.time() * 1000) + 60 * DAY)), \
              mock.patch("app.routers.integrations.discover", return_value=agency_pages):
             ok = self.client.get(f"{API}/integrations/meta/callback?code=abc&state={state}", follow_redirects=False)
-        self.assertTrue(ok.headers["location"].endswith("/settings?meta=connected"))
+        self.assertIn("/settings?oauth=connected&provider=facebook", ok.headers["location"])
         st = self.get("/integrations/status", self.agency).json()
         self.assertTrue(st["meta"]["facebookReady"])
         self.assertTrue(st["meta"]["neverExpires"])
@@ -285,6 +285,80 @@ class Api(unittest.TestCase):
         # viewer (not admin) cannot start the connect flow
         viewer = self.client.post(f"{API}/auth/login", json={"email": "viewer@test.dev", "password": PW}).json()["accessToken"]
         self.assertEqual(self.get("/integrations/meta/connect-url", {"Authorization": f"Bearer {viewer}"}).status_code, 403)
+
+    def test_64_connected_pages_can_be_added_to_a_client(self):
+        # pages from the earlier "Connect with Facebook" (no client chosen) wait in "available"
+        avail = self.get("/accounts/available", self.agency).json()
+        self.assertIn(("facebook", "222"), {(i["platform"], i["id"]) for i in avail})
+        client_id = self.get("/clients", self.agency).json()[0]["id"]
+        fb_data = {"externalId": "222", "username": "sharmaclinic", "displayName": "Sharma Clinic", "followers": 1500, "following": 0,
+                   "posts": [{"externalId": "p1", "title": "Hello", "format": "Post", "publishedAt": "2026-10-01", "views": 0,
+                              "likes": 10, "comments": 2, "shares": 1, "url": None}]}
+        with mock.patch("app.services.sync_service.fetch_facebook", return_value=fb_data):
+            r = self.post("/accounts/add-connected", self.agency, {"clientId": client_id, "items": [{"platform": "facebook", "id": "222"}]})
+        self.assertEqual(r.status_code, 200, r.text)
+        self.assertEqual(r.json()["added"], [{"platform": "facebook", "username": "sharmaclinic"}])
+        self.assertNotIn(("facebook", "222"), {(i["platform"], i["id"]) for i in self.get("/accounts/available", self.agency).json()})
+
+    def test_65_client_connect_link_facebook_and_google_auto_add(self):
+        # owner sets up Google once
+        self.assertEqual(self.client.put(f"{API}/integrations/google-app", headers=self.agency, json={"clientId": "x", "clientSecret": "y"}).status_code, 403)
+        r = self.client.put(f"{API}/integrations/google-app", headers=self.owner, json={"clientId": "goog-123.apps", "clientSecret": "gsecret"})
+        self.assertEqual(r.status_code, 200)
+        owner_st = self.get("/integrations/status", self.owner).json()
+        self.assertTrue(owner_st["google"]["redirectUri"].endswith("/api/v1/integrations/google/callback"))
+        self.assertNotIn("gsecret", json.dumps(owner_st))
+        # agency creates a link for a new client
+        cid = self.post("/clients", self.agency, {"name": "Gupta Bakery"}).json()["id"]
+        link = self.post(f"/clients/{cid}/connect-link", self.agency).json()["url"]
+        token = link.rsplit("/", 1)[1]
+        self.assertEqual(self.post(f"/clients/{cid}/connect-link", self.agency).json()["url"], link)  # same link reused
+        # client opens it — no login
+        info = self.client.get(f"{API}/public/connect/{token}").json()
+        self.assertEqual(info["clientName"], "Gupta Bakery")
+        self.assertEqual(info["providers"], {"facebook": True, "google": True})
+        self.assertEqual(self.client.get(f"{API}/public/connect/nope").status_code, 404)
+        # --- Facebook: page + linked Instagram both added under the client
+        url = self.client.get(f"{API}/public/connect/{token}/start?provider=facebook").json()["url"]
+        state = url.split("state=")[1].split("&")[0]
+        pages = {"pages": ["Gupta Bakery"], "igId": "1789", "igUsername": "guptabakery", "igToken": "PT3",
+                 "pageTokens": {"333": {"name": "Gupta Bakery", "username": "guptabakery", "token": "PT3", "igId": "1789", "igUsername": "guptabakery"}}}
+        fb = {"externalId": "333", "username": "guptabakery", "displayName": "Gupta Bakery", "followers": 900, "following": 0, "posts": []}
+        ig = {"externalId": "1789", "username": "guptabakery", "displayName": "Gupta Bakery", "followers": 4200, "following": 10, "posts": []}
+        with mock.patch("app.routers.integrations.exchange_code", return_value="short"), \
+             mock.patch("app.routers.integrations.long_lived", return_value=("LONG3", int(time.time() * 1000) + 60 * DAY)), \
+             mock.patch("app.routers.integrations.discover", return_value=pages), \
+             mock.patch("app.services.sync_service.fetch_facebook", return_value=fb), \
+             mock.patch("app.services.sync_service.fetch_instagram", return_value=ig):
+            res = self.client.get(f"{API}/integrations/meta/callback?code=abc&state={state}", follow_redirects=False)
+        loc = res.headers["location"]
+        self.assertIn(f"/connect/{token}?oauth=connected&provider=facebook", loc)
+        self.assertIn("added=2", loc)
+        # --- Google: YouTube channel added, synced with its own login (no API key)
+        url = self.client.get(f"{API}/public/connect/{token}/start?provider=google").json()["url"]
+        self.assertIn("client_id=goog-123.apps", url)
+        self.assertIn("access_type=offline", url)
+        state = url.split("state=")[1].split("&")[0]
+        yt = {"externalId": "UCgupta", "username": "guptabakery", "displayName": "Gupta Bakery", "followers": 120, "following": 0,
+              "totalViews": 5000, "posts": []}
+        with mock.patch("app.routers.integrations.exchange_code_google", return_value={"access_token": "at", "refresh_token": "rt"}), \
+             mock.patch("app.routers.integrations.my_channels", return_value=[{"id": "UCgupta", "title": "Gupta Bakery", "handle": "guptabakery"}]), \
+             mock.patch("app.services.sync_service.google_access_token", return_value="fresh") as gat, \
+             mock.patch("app.services.sync_service.fetch_youtube", return_value=yt) as fy:
+            res = self.client.get(f"{API}/integrations/google/callback?code=abc&state={state}", follow_redirects=False)
+        self.assertIn("oauth=connected&provider=google", res.headers["location"])
+        self.assertIn("added=1", res.headers["location"])
+        gat.assert_called_with("goog-123.apps", "gsecret", "rt")
+        self.assertEqual(fy.call_args[0], ("UCgupta", "oauth:fresh"))
+        accs = [a for a in self.get("/accounts", self.agency).json() if a["clientName"] == "Gupta Bakery"]
+        self.assertEqual(sorted(a["platform"] for a in accs), ["facebook", "instagram", "youtube"])
+        self.assertTrue(all(a["mode"] == "api" for a in accs))
+        self.assertEqual(len(self.client.get(f"{API}/public/connect/{token}").json()["connected"]), 3)
+        # cancel on the Google screen goes back to the link page
+        url = self.client.get(f"{API}/public/connect/{token}/start?provider=google").json()["url"]
+        state = url.split("state=")[1].split("&")[0]
+        res = self.client.get(f"{API}/integrations/google/callback?error=access_denied&state={state}", follow_redirects=False)
+        self.assertIn("oauth=cancelled", res.headers["location"])
 
     def test_63_schema_self_updates_on_deploy(self):
         from sqlalchemy import create_engine, inspect, text

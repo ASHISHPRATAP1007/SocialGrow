@@ -39,7 +39,7 @@ uvicorn app.main:app --reload --port 8000
 
 - `DATABASE_URL` khaali chhodo → local `socialgrow.db` (SQLite) file ban jayegi.
 - API docs: http://localhost:8000/docs
-- Tests: `pytest -q` (17 tests)
+- Tests: `pytest -q` (19 tests)
 
 ### Frontend
 
@@ -111,16 +111,24 @@ Sab kuch app ke **Settings** aur **Admin Panel** se hota hai — code badalne ki
 | 3 | developers.facebook.com → App → Facebook Login → Settings | Settings page par dikha **Redirect URI** "Valid OAuth Redirect URIs" mein daalo | — |
 | 4 | Admin Panel → Razorpay | **Key ID + Key Secret + Webhook Secret**; Admin Panel ka Webhook URL Razorpay Dashboard → Webhooks mein (events `subscription.*`) | Nahi |
 | 5 | cron-job.org | 2 jobs (Section 2, Step G) | Nahi |
+| 6 | console.cloud.google.com → APIs & Services | **YouTube Data API** enable → OAuth consent screen (External, scope `youtube.readonly`, status **In production**) → Credentials → **OAuth client ID (Web)** → Settings mein dikha Google **Redirect URI** "Authorized redirect URIs" mein daalo → Client ID + Secret Settings mein save | Nahi |
 
 **Iske baad sab automatic:**
 - Nayi agency signup → **turant 30 din trial** (koi approval nahi).
-- Har agency ko **YouTube + Instagram live data** bina kisi setup ke.
-- **Facebook Pages:** agency Settings mein **"Connect with Facebook"** dabati hai → Facebook login → apne Pages chunti hai. Token kabhi expire nahi hota.
+- **Accounts sirf login se judte hain — koi ID / username / key nahi** (Social Accounts page):
+  1. Client chuno.
+  2a. Access agency ke paas hai → **Connect with Facebook** (Pages + unse juda Instagram) / **Connect with Google** (YouTube channels) → sab apne aap us client mein LIVE add.
+  2b. Access client ke paas hai → **Connect link** copy karke WhatsApp par bhejo → client bina SocialGrow account ke link kholta hai, Facebook/Google se login karta hai → accounts apne aap agency ke us client mein. Link 30 din chalta hai.
+- Bina client chune login kiya ho to accounts "Connected, par abhi kisi client mein nahi" list mein dikhte hain — ek click "Add".
+- Competitor / public accounts ke liye username wala tareeka bhi hai (owner ki YouTube key + Instagram connection se, agency ko kuch nahi daalna).
+- Facebook Page tokens aur Google refresh tokens kabhi manually update nahi karne padte.
 - **Payment:** Razorpay se subscribe → har mahine / saal **auto-renew** → webhook se plan apne aap update. Fail hone par retry, reminder, 3 din grace, phir read-only.
 - **Sync** har 6 ghante, **reminders** roz — sab apne aap.
 - **Naya code deploy** karne par database apne aap update hota hai (naye columns khud ban jaate hain).
 
-> **Meta App Live mode (ek baar):** jab tak Meta App "Development" mode mein hai, "Connect with Facebook" sirf un logon ke liye chalega jo App Roles mein added hain. Sab agencies ke liye: developers.facebook.com → App → **App Review** mein `pages_show_list`, `pages_read_engagement` ke liye Advanced Access request karo, Privacy Policy URL daalo, aur App ko **Live** karo. YouTube aur Instagram iske bina bhi sab agencies ke liye chalte hain.
+> **Meta App Live mode (ek baar):** jab tak Meta App "Development" mode mein hai, "Connect with Facebook" sirf un logon ke liye chalega jo App Roles mein added hain. Sab agencies ke liye: developers.facebook.com → App → **App Review** mein `pages_show_list`, `pages_read_engagement` ke liye Advanced Access request karo, Privacy Policy URL daalo, aur App ko **Live** karo. Username wala YouTube/Instagram iske bina bhi chalta hai.
+
+> **Google verification (ek baar):** `youtube.readonly` sensitive scope hai. Consent screen "In production" rakho (Testing mode mein login 7 din mein expire hota hai). Verification se pehle Google ek "unverified app" warning dikhata hai aur 100 users tak limit hai — verification free hai (Privacy Policy URL + app ka short video).
 
 **UPI fallback (optional):** Razorpay set hone tak Admin Panel mein UPI ID daal sakte ho — tab payment manually verify karne padte hain. Razorpay set hote hi ye apne aap chhup jaata hai.
 

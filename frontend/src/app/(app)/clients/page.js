@@ -2,7 +2,8 @@
 
 import { useState } from 'react'
 import { toast } from 'sonner'
-import { Plus, Trash2, Mail, Phone, Building2 } from 'lucide-react'
+import { Plus, Trash2, Mail, Phone, Building2, Link2, MessageCircle } from 'lucide-react'
+import { shareConnectLink, whatsappHref } from '@/components/connect'
 import { api, refreshAll } from '@/lib/api'
 import { useApi } from '@/hooks/useApi'
 import { Button, ButtonLink } from '@/components/ui/button'
@@ -16,6 +17,7 @@ export default function ClientsPage() {
   const { data: clients } = useApi('/clients')
   const [open, setOpen] = useState(false)
   const [form, setForm] = useState(EMPTY)
+  const [links, setLinks] = useState({})
   const manage = can(me.role, 'manage')
 
   if (!clients) return <Loading />
@@ -114,6 +116,21 @@ export default function ClientsPage() {
                 <span className="mr-1 text-xs font-medium">{c.projectCount} project(s)</span>
                 {c.platforms.map((p) => <PlatformBadge key={p} platform={p} label={false} />)}
               </div>
+              {manage && (
+                <div className="mt-3 flex flex-wrap gap-2 border-t pt-3">
+                  <Button size="sm" variant="outline" onClick={async () => {
+                    const url = await shareConnectLink(c)
+                    if (url) setLinks((l) => ({ ...l, [c.id]: url }))
+                  }}>
+                    <Link2 className="size-4" /> Connect link
+                  </Button>
+                  {links[c.id] && (
+                    <a className="inline-flex h-8 items-center gap-1.5 rounded-md bg-[#25D366] px-3 text-sm font-medium text-white" href={whatsappHref(c, links[c.id])} target="_blank" rel="noreferrer">
+                      <MessageCircle className="size-4" /> WhatsApp
+                    </a>
+                  )}
+                </div>
+              )}
             </div>
           ))}
         </div>

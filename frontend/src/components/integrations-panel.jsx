@@ -2,12 +2,13 @@
 
 import { useState } from 'react'
 import { toast } from 'sonner'
-import { CheckCircle2, CircleDashed, Copy, ExternalLink, Facebook, KeyRound } from 'lucide-react'
+import { CheckCircle2, CircleDashed, Copy, ExternalLink, KeyRound } from 'lucide-react'
 import { api, refreshAll } from '@/lib/api'
 import { useApi } from '@/hooks/useApi'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Field, Panel, PlatformBadge, errMsg } from '@/components/sg'
+import { LoginButtons } from '@/components/connect'
 
 function StatusPill({ ok, text }) {
   return (
@@ -23,6 +24,7 @@ export function IntegrationsPanel({ canEdit }) {
   const [meta, setMeta] = useState({ token: '', appId: '', appSecret: '' })
   const [busy, setBusy] = useState(null)
   const [advanced, setAdvanced] = useState(false)
+  const [gApp, setGApp] = useState({ clientId: '', clientSecret: '' })
 
   if (!status) return null
   const owner = status.shared.isPlatformOwner
@@ -31,17 +33,6 @@ export function IntegrationsPanel({ canEdit }) {
   const showTokenForm = owner || advanced || !m.oauthAvailable
   const exp = m.expiresAt ? new Date(m.expiresAt) : null
   const daysLeft = exp ? Math.ceil((exp.getTime() - Date.now()) / 86400000) : null
-
-  async function connectFacebook() {
-    setBusy('fb')
-    try {
-      const { data } = await api.get('/integrations/meta/connect-url')
-      window.location.href = data.url
-    } catch (err) {
-      toast.error(errMsg(err))
-      setBusy(null)
-    }
-  }
 
   return (
     <Panel title={<span className="flex items-center gap-2"><KeyRound className="size-4 text-primary" /> Integrations (real data)</span>}>
@@ -53,6 +44,7 @@ export function IntegrationsPanel({ canEdit }) {
             <li className={status.youtube.configured ? 'line-through opacity-70' : ''}>YouTube API key save karein</li>
             <li className={m.appConfigured ? 'line-through opacity-70' : ''}>Meta App ID + App Secret + apna token save karein</li>
             <li>Meta App → Facebook Login → Settings → <b>Valid OAuth Redirect URIs</b> mein neeche wala URL daalein</li>
+            <li className={status.google.appConfigured ? 'line-through opacity-70' : ''}>Google OAuth Client ID + Secret save karein (YouTube login ke liye)</li>
           </ol>
         </div>
       ) : (
@@ -60,7 +52,7 @@ export function IntegrationsPanel({ canEdit }) {
           {[
             ['youtube', status.youtube.ready, 'Ready — koi setup nahi'],
             ['instagram', m.instagramReady, 'Ready — koi setup nahi'],
-            ['facebook', m.facebookReady, m.facebookReady ? 'Aapke Pages connected' : 'Neeche ek click se connect karein'],
+            ['facebook', m.facebookReady, m.facebookReady ? `${m.pages.length} Page(s) connected` : 'Login se connect karein'],
           ].map(([p, ok, text]) => (
             <div key={p} className="flex flex-wrap items-center justify-between gap-2 rounded-lg border p-3">
               <PlatformBadge platform={p} />
@@ -130,19 +122,18 @@ export function IntegrationsPanel({ canEdit }) {
           </div>
         )}
 
-        {!owner && m.oauthAvailable && (
-          <div className="flex flex-wrap items-center gap-3">
-            <Button disabled={!canEdit || busy !== null} onClick={connectFacebook}>
-              <Facebook className="size-4" /> {busy === 'fb' ? 'Opening Facebook…' : m.configured ? 'Reconnect Facebook' : 'Connect with Facebook'}
-            </Button>
-            <span className="text-xs text-muted-foreground">Facebook pe login karke apne (ya client ke) Pages chunein. Bas itna hi.</span>
+        {!owner && (
+          <div className="space-y-2">
+            <LoginButtons back="settings" status={status} disabled={!canEdit} />
+            <p className="text-xs text-muted-foreground">
+              Facebook / Google se login karein — Pages, Instagram aur YouTube channels mil jayenge. Unko client mein add karne ke liye
+              <b> Social Accounts</b> page kholein (wahan se client ko connect link bhi bhej sakte hain).
+            </p>
+            {status.google.channels.length > 0 && <div className="text-xs">YouTube channels: <b>{status.google.channels.join(', ')}</b></div>}
             {m.configured && canEdit && (
-              <Button variant="ghost" size="sm" onClick={() => confirm('Facebook connection hatayein?') && api.delete('/integrations/meta').then(refreshAll)}>Disconnect</Button>
+              <Button variant="ghost" size="sm" onClick={() => confirm('Facebook connection hatayein?') && api.delete('/integrations/meta').then(refreshAll)}>Disconnect Facebook</Button>
             )}
           </div>
-        )}
-        {!owner && !m.oauthAvailable && !advanced && (
-          <p className="text-sm text-muted-foreground">Facebook connect jald available hoga.</p>
         )}
 
         {owner && m.redirectUri && (
@@ -201,6 +192,52 @@ export function IntegrationsPanel({ canEdit }) {
           </form>
         )}
       </div>
+
+      {owner && (
+        <div className="mt-4 rounded-lg border p-4">
+          <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+            <span className="text-sm font-semibold">Google login (YouTube) — Connect with Google</span>
+            <StatusPill ok={status.google.appConfigured} text={status.google.appConfigured ? `Set ${status.google.clientIdHint || ''}` : 'Not set'} />
+          </div>
+          {status.google.redirectUri && (
+            <div className="mb-3 rounded-md border p-3 text-xs">
+              <div className="mb-1 font-semibold">Google Cloud → APIs &amp; Services → Credentials → OAuth client (Web) → Authorized redirect URIs mein ye daalein:</div>
+              <div className="flex items-center gap-2">
+                <code className="break-all rounded bg-muted px-2 py-1">{status.google.redirectUri}</code>
+                <button aria-label="Copy Google redirect URI" onClick={() => { void navigator.clipboard.writeText(status.google.redirectUri); toast.success('Copied') }}><Copy className="size-3.5" /></button>
+              </div>
+            </div>
+          )}
+          <form
+            className="grid gap-2 sm:grid-cols-3"
+            onSubmit={async (e) => {
+              e.preventDefault()
+              setBusy('google')
+              try {
+                await api.put('/integrations/google-app', gApp)
+                toast.success('Google login set ho gaya — ab sab "Connect with Google" kar sakte hain')
+                setGApp({ clientId: '', clientSecret: '' })
+                refreshAll()
+              } catch (err) {
+                toast.error(errMsg(err))
+              } finally {
+                setBusy(null)
+              }
+            }}
+          >
+            <Field label="OAuth Client ID">
+              <Input required disabled={!canEdit} value={gApp.clientId} onChange={(e) => setGApp({ ...gApp, clientId: e.target.value })} placeholder={status.google.appConfigured ? 'Saved ✓ (badalna ho toh daalein)' : '…apps.googleusercontent.com'} />
+            </Field>
+            <Field label="OAuth Client Secret">
+              <Input required type="password" autoComplete="off" disabled={!canEdit} value={gApp.clientSecret} onChange={(e) => setGApp({ ...gApp, clientSecret: e.target.value })} placeholder={status.google.appConfigured ? 'Saved ✓' : 'GOCSPX-…'} />
+            </Field>
+            <div className="flex items-end"><Button type="submit" disabled={!canEdit || busy !== null}>{busy === 'google' ? 'Saving…' : 'Save'}</Button></div>
+          </form>
+          <p className="mt-2 text-xs text-muted-foreground">
+            Scope: <code>youtube.readonly</code> · OAuth consent screen ko <b>In production</b> rakhein (Testing mode mein login 7 din baad expire hota hai).
+          </p>
+        </div>
+      )}
 
       {!owner && !advanced && (
         <button type="button" className="mt-3 text-xs text-muted-foreground underline" onClick={() => setAdvanced(true)}>

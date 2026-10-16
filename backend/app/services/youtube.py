@@ -1,4 +1,4 @@
-"""YouTube Data API v3 (free API key) — any public channel."""
+"""YouTube Data API v3 — any public channel with the owner's free API key, or own channels via Google OAuth."""
 import re
 
 import httpx
@@ -44,7 +44,12 @@ def _duration_seconds(d: str) -> int:
 
 
 def _yt(path: str, params: dict, key: str) -> dict:
-    r = httpx.get(f"https://www.googleapis.com/youtube/v3/{path}", params={**params, "key": key}, timeout=30)
+    """`key` is an API key, or "oauth:<access token>" for a channel connected with "Connect with Google"."""
+    if key.startswith("oauth:"):
+        r = httpx.get(f"https://www.googleapis.com/youtube/v3/{path}", params=params,
+                      headers={"Authorization": f"Bearer {key[6:]}"}, timeout=30)
+    else:
+        r = httpx.get(f"https://www.googleapis.com/youtube/v3/{path}", params={**params, "key": key}, timeout=30)
     data = r.json()
     if r.status_code >= 400 or data.get("error"):
         raise ApiError(f"YouTube: {data.get('error', {}).get('message', r.reason_phrase)}")

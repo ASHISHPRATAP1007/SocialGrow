@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { Suspense, useState } from 'react'
 import Link from 'next/link'
 import { toast } from 'sonner'
 import { Link2, Unplug, Info, RefreshCw } from 'lucide-react'
@@ -8,6 +8,7 @@ import { api, refreshAll } from '@/lib/api'
 import { useApi } from '@/hooks/useApi'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { ConnectPanel, OAuthResult } from '@/components/connect'
 import { DemoBadge, LiveBadge, EmptyState, Field, Loading, PLATFORMS, P_LABEL, PageHeader, Panel, PlatformBadge, can, errMsg, fmt, selectClass, useMe } from '@/components/sg'
 
 const PLACEHOLDER = {
@@ -27,8 +28,20 @@ function ago(ts) {
 }
 
 export default function AccountsPage() {
+  return (
+    <>
+      <Suspense fallback={null}>
+        <OAuthResult />
+      </Suspense>
+      <AccountsView />
+    </>
+  )
+}
+
+function AccountsView() {
   const me = useMe()
   const { data: accounts } = useApi('/accounts')
+  const { data: clients } = useApi('/clients')
   const { data: projects } = useApi('/projects')
   const { data: integ } = useApi('/integrations/status')
   const [platform, setPlatform] = useState(null)
@@ -38,7 +51,7 @@ export default function AccountsPage() {
   const [syncing, setSyncing] = useState(null)
   const manage = can(me.role, 'manage')
 
-  if (!accounts || !projects || !integ) return <Loading />
+  if (!accounts || !projects || !integ || !clients) return <Loading />
 
   const liveReady = (p) => (p === 'youtube' ? integ.youtube.ready : p === 'instagram' ? integ.meta.instagramReady : integ.meta.facebookReady)
 
@@ -69,8 +82,11 @@ export default function AccountsPage() {
     <>
       <PageHeader title="Social Accounts" subtitle="Official APIs se real data — har 6 ghante mein auto-sync." />
 
+      {manage && <ConnectPanel clients={clients} status={integ} />}
+
       {manage && (
-        <Panel title="Connect platform" className="mb-4">
+        <Panel title="Username se jodein (public / competitor accounts)" className="mb-4">
+          <p className="-mt-1 mb-3 text-xs text-muted-foreground">Jinka login aapke paas nahi — jaise competitor. YouTube aur Instagram Business ka public data milega.</p>
           <div className="grid gap-3 sm:grid-cols-3">
             {PLATFORMS.map((p) => (
               <button
