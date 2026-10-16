@@ -11,9 +11,12 @@ url = settings.DATABASE_URL
 # Neon / Render give "postgres://" — SQLAlchemy needs "postgresql://"
 if url.startswith("postgres://"):
     url = "postgresql://" + url[len("postgres://") :]
+# Pin the psycopg2 driver (SQLAlchemy 2.1 defaults to psycopg 3, which isn't installed)
+if url.startswith("postgresql://"):
+    url = "postgresql+psycopg2://" + url[len("postgresql://") :]
 
 connect_args = {"check_same_thread": False} if url.startswith("sqlite") else {}
-engine = create_engine(url, pool_pre_ping=True, connect_args=connect_args)
+engine = create_engine(url, pool_pre_ping=True, pool_recycle=280, connect_args=connect_args)
 SessionLocal = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
 
 
