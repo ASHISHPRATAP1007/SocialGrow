@@ -60,6 +60,9 @@ export default function Home() {
           <AuthCard onDone={() => router.replace('/dashboard')} />
         </div>
       </div>
+      <footer className="border-t py-6 text-center text-xs text-muted-foreground">
+        © SocialGrow AI · <a href="/privacy" className="hover:underline">Privacy Policy</a> · <a href="/terms" className="hover:underline">Terms of Service</a>
+      </footer>
     </div>
   )
 }
