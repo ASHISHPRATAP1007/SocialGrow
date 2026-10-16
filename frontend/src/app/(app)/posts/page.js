@@ -9,7 +9,7 @@ import { Button } from '@/components/ui/button'
 import { EmptyState, Loading, P_LABEL, PageHeader, Panel, PlatformBadge, errMsg, fmt, niceDate, selectClass } from '@/components/sg'
 
 export default function PostsPage() {
-  const [days, setDays] = useState(90)
+  const [days, setDays] = useState(0)
   const [platform, setPlatform] = useState('')
   const [sort, setSort] = useState('recent')
   const { data: posts } = useApi('/posts', { days, platform, sort })
@@ -32,8 +32,10 @@ export default function PostsPage() {
       <PageHeader title="Post Analytics" subtitle="Har post ka performance aur account average se comparison" />
       <div className="mb-4 flex flex-wrap gap-2">
         <select className={selectClass + ' w-36'} value={days} onChange={(e) => setDays(Number(e.target.value))}>
+          <option value={0}>All time</option>
           <option value={30}>Last 30 days</option>
           <option value={90}>Last 90 days</option>
+          <option value={365}>Last 1 year</option>
         </select>
         <select className={selectClass + ' w-36'} value={platform} onChange={(e) => setPlatform(e.target.value)}>
           <option value="">All platforms</option>
@@ -80,7 +82,7 @@ export default function PostsPage() {
       {!posts ? (
         <Loading />
       ) : posts.length === 0 ? (
-        <EmptyState title="Koi post nahi" text="Is period mein koi post data nahi mila." />
+        <EmptyState title="Koi post nahi" text={days ? 'Is period mein koi post nahi. Upar "All time" chun kar purani posts dekhein.' : 'Abhi koi post sync nahi hui.'} />
       ) : (
         <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
           {posts.map((p) => (

@@ -160,7 +160,7 @@ function AccountsView() {
           <table className="w-full text-sm">
             <thead className="bg-muted/60 text-left text-xs text-muted-foreground uppercase">
               <tr>
-                <th className="px-4 py-3">Account</th>
+                <th className="px-4 py-3">Account <span className="normal-case font-normal">(click = poori details)</span></th>
                 <th className="px-4 py-3">Client / Project</th>
                 <th className="px-4 py-3">Followers</th>
                 <th className="px-4 py-3">Source</th>
@@ -175,7 +175,7 @@ function AccountsView() {
                     <div className="flex items-center gap-2">
                       <PlatformBadge platform={a.platform} label={false} />
                       <div>
-                        <div className="font-medium">@{a.username}</div>
+                        <Link href={`/account?id=${a.id}`} className="font-medium text-primary hover:underline">@{a.username}</Link>
                         {a.displayName && a.displayName !== a.username && <div className="text-xs text-muted-foreground">{a.displayName}</div>}
                       </div>
                     </div>

@@ -362,6 +362,31 @@ class Api(unittest.TestCase):
         res = self.client.get(f"{API}/integrations/google/callback?error=access_denied&state={state}", follow_redirects=False)
         self.assertIn("oauth=cancelled", res.headers["location"])
 
+    def test_66_account_details_show_full_history_without_date_range(self):
+        acc = next(a for a in self.get("/accounts", self.agency).json() if a["username"] == "guptabakery" and a["platform"] == "youtube")
+        from app.database import SessionLocal as S
+        from app.models import Post as P
+        with S() as db:  # a quiet channel: last video more than a year ago
+            db.add(P(agency_id=self._agency_id(self.agency), account_id=acc["id"], platform="youtube", format="Video", title="Old video",
+                     published_at="2025-08-13", external_id="vid1", views=1299, likes=3, comments=2, shares=0))
+            db.commit()
+        d = self.get(f"/accounts/{acc['id']}/details", self.agency).json()
+        self.assertEqual(d["lifetime"]["posts"], 1)
+        self.assertEqual(d["lifetime"]["views"], 1299)
+        self.assertEqual(d["bestByViews"][0]["title"], "Old video")
+        self.assertGreater(d["lifetime"]["daysSinceLastPost"], 300)
+        self.assertTrue(d["commentsSupported"])
+        self.assertEqual(len(self.get("/posts", self.agency, params={"days": 90, "accountId": acc["id"]}).json()), 0)
+        self.assertEqual(len(self.get("/posts", self.agency, params={"days": 0, "accountId": acc["id"]}).json()), 1)
+        ov = self.get("/analytics/overview", self.agency, params={"days": 30, "accountId": acc["id"]}).json()
+        self.assertEqual(ov["quietAccounts"][0]["lastPostAt"], "2025-08-13")
+        post_id = d["posts"][0]["id"]
+        with mock.patch("app.routers.analytics.google_access_token", return_value="tok"), \
+             mock.patch("app.routers.analytics.fetch_comments", return_value=[{"author": "A", "text": "Nice", "likes": 1, "replies": 0, "publishedAt": "2025-08-14"}]) as fc:
+            r = self.get(f"/posts/{post_id}/comments", self.agency)
+        self.assertEqual(r.json()[0]["text"], "Nice")
+        self.assertEqual(fc.call_args[0], ("vid1", "oauth:tok"))
+
     def test_63_schema_self_updates_on_deploy(self):
         from sqlalchemy import create_engine, inspect, text
         import app.database as database

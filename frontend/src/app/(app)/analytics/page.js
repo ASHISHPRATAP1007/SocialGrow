@@ -1,6 +1,7 @@
 'use client'
 
 import { useState } from 'react'
+import Link from 'next/link'
 import { Bar, BarChart, CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import { useApi } from '@/hooks/useApi'
 import { SourceBadges, EmptyState, Loading, P_LABEL, PageHeader, Panel, PlatformBadge, Stat, fmt, selectClass } from '@/components/sg'
@@ -58,6 +59,19 @@ export default function AnalyticsPage() {
         <EmptyState title="Data nahi mila" text="Is filter ke liye koi connected account nahi hai." />
       ) : (
         <>
+          {data.quietAccounts?.length > 0 && (
+            <div className="mb-3 rounded-md bg-warning-soft p-3 text-sm">
+              Is range mein in accounts par koi nayi post nahi aayi, isliye numbers kam/zero dikh rahe hain:{' '}
+              {data.quietAccounts.map((q, i) => (
+                <span key={q.id}>
+                  {i > 0 && ', '}
+                  <Link href={`/account?id=${q.id}`} className="font-semibold text-primary hover:underline">@{q.username} ({P_LABEL[q.platform]})</Link>
+                  {q.lastPostAt ? ` — aakhri post ${q.lastPostAt}` : ' — abhi koi post nahi'}
+                </span>
+              ))}
+              . Naam par click karke <b>poori history</b> dekhein, ya upar badi range (1 Year) chunein.
+            </div>
+          )}
           <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-5">
             <Stat label="Followers" value={fmt(data.totals.followers)} delta={data.deltas?.followers} />
             <Stat label="Growth" value={`${data.totals.followerGrowth >= 0 ? '+' : ''}${fmt(data.totals.followerGrowth)}`} hint={`${data.totals.growthRate.toFixed(2)}% growth rate`} />

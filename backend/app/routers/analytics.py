@@ -3,10 +3,13 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ..core.deps import Workspace, read_ws
-from ..core.lib import days_ago, pct_change, post_rate, series_for_accounts, summarize, with_post_fallback
+from ..core.lib import ApiError, days_ago, pct_change, post_rate, series_for_accounts, summarize, with_post_fallback
 from ..core.serialize import to_dict
 from ..database import get_db
-from ..models import Post, SocialAccount
+from ..models import Client, MetricDaily, Post, SocialAccount
+from ..services.google import access_token as google_access_token
+from ..services.sync_service import resolve
+from ..services.youtube import fetch_comments
 
 router = APIRouter(tags=["analytics"])
 
@@ -53,7 +56,15 @@ def overview(days: int = 30, clientId: str | None = None, projectId: str | None 
         per_platform.append({"platform": pl, "accounts": len(mine), **_combine([c for _, c in mine], base)})
 
     chart = [p for i, p in enumerate(series) if i % 7 == 0 or i == len(series) - 1] if days > 90 else series
+    quiet = []
+    for a in accounts:
+        if a.mode != "api":
+            continue
+        last = db.scalar(select(Post.published_at).where(Post.account_id == a.id).order_by(Post.published_at.desc()).limit(1))
+        if not last or last < start:
+            quiet.append({"id": a.id, "platform": a.platform, "username": a.username, "lastPostAt": last})
     return {
+        "quietAccounts": quiet,
         "days": days,
         "accountCount": len(accounts),
         "hasDemo": any(a.mode == "demo" for a in accounts),
@@ -78,7 +89,10 @@ def overview(days: int = 30, clientId: str | None = None, projectId: str | None 
 @router.get("/posts")
 def posts_list(days: int = 90, sort: str = "recent", platform: str | None = None, accountId: str | None = None,
                ws: Workspace = Depends(read_ws), db: Session = Depends(get_db)):
-    posts = db.scalars(select(Post).where(Post.agency_id == ws.agency.id, Post.published_at >= days_ago(days))).all()
+    q = select(Post).where(Post.agency_id == ws.agency.id)
+    if days and days > 0:  # 0 = all time
+        q = q.where(Post.published_at >= days_ago(days))
+    posts = db.scalars(q).all()
     accounts = {a.id: a for a in db.scalars(select(SocialAccount).where(SocialAccount.agency_id == ws.agency.id)).all()}
     avg: dict[str, float] = {}
     for aid, a in accounts.items():
@@ -96,3 +110,84 @@ def posts_list(days: int = 90, sort: str = "recent", platform: str | None = None
     key = {"views": lambda r: -r["views"], "engagement": lambda r: -r["engagementRate"]}.get(sort)
     rows.sort(key=key) if key else rows.sort(key=lambda r: r["publishedAt"], reverse=True)
     return rows[:200]
+
+
+def _profile_url(a: SocialAccount) -> str | None:
+    if a.platform == "youtube":
+        return f"https://www.youtube.com/channel/{a.external_id}" if a.external_id else f"https://www.youtube.com/@{a.username}"
+    if a.platform == "instagram":
+        return f"https://www.instagram.com/{a.username}/"
+    return f"https://www.facebook.com/{a.external_id or a.username}"
+
+
+@router.get("/accounts/{account_id}/details")
+def account_details(account_id: str, ws: Workspace = Depends(read_ws), db: Session = Depends(get_db)):
+    """Everything about one account — lifetime totals, all stored posts, best posts, monthly and format breakdown.
+    No date range, so quiet accounts (no recent posts) still show their full picture."""
+    a = db.get(SocialAccount, account_id)
+    if not a or a.agency_id != ws.agency.id:
+        raise ApiError("Account nahi mila.", 404)
+    client = db.get(Client, a.client_id)
+    posts = db.scalars(select(Post).where(Post.account_id == a.id).order_by(Post.published_at.desc())).all()
+    rows = [to_dict(p) | {"engagementRate": post_rate(p, a.followers)} for p in posts]
+    n = len(posts)
+    views, likes = sum(p.views for p in posts), sum(p.likes for p in posts)
+    comments, shares = sum(p.comments for p in posts), sum(p.shares for p in posts)
+    inter = likes + comments + shares
+    base = views if views > 0 else (a.followers or 0) * n
+    months: dict[str, dict] = {}
+    for p in posts:
+        m = months.setdefault(p.published_at[:7], {"month": p.published_at[:7], "posts": 0, "views": 0, "likes": 0, "comments": 0})
+        m["posts"] += 1
+        m["views"] += p.views
+        m["likes"] += p.likes
+        m["comments"] += p.comments
+    formats: dict[str, dict] = {}
+    for p in posts:
+        f = formats.setdefault(p.format, {"format": p.format, "posts": 0, "views": 0, "rate": 0.0})
+        f["posts"] += 1
+        f["views"] += p.views
+        f["rate"] += post_rate(p, a.followers)
+    history = db.scalars(select(MetricDaily).where(MetricDaily.account_id == a.id).order_by(MetricDaily.date)).all()
+    gap = None
+    if posts:
+        from datetime import date
+        gap = (date.today() - date.fromisoformat(posts[0].published_at)).days
+    return {
+        "account": {"id": a.id, "platform": a.platform, "username": a.username, "displayName": a.display_name, "mode": a.mode,
+                    "followers": a.followers or 0, "totalViews": a.last_total_views, "status": a.status, "syncError": a.sync_error,
+                    "lastSyncedAt": a.last_synced_at, "clientName": client.name if client else None, "url": _profile_url(a)},
+        "lifetime": {"posts": n, "views": views, "likes": likes, "comments": comments, "shares": shares,
+                     "avgViews": views / n if n else 0, "avgLikes": likes / n if n else 0, "avgComments": comments / n if n else 0,
+                     "engagementRate": inter / base * 100 if base else 0,
+                     "firstPostAt": posts[-1].published_at if posts else None, "lastPostAt": posts[0].published_at if posts else None,
+                     "daysSinceLastPost": gap},
+        "bestByViews": sorted(rows, key=lambda r: -r["views"])[:5],
+        "bestByEngagement": sorted(rows, key=lambda r: -r["engagementRate"])[:5],
+        "monthly": sorted(months.values(), key=lambda m: m["month"])[-12:],
+        "formats": [{"format": f["format"], "posts": f["posts"], "avgViews": f["views"] / f["posts"], "avgEngagement": f["rate"] / f["posts"]}
+                    for f in formats.values()],
+        "history": [{"date": h.date, "followers": h.followers, "views": h.views} for h in history],
+        "posts": rows,
+        "commentsSupported": a.platform == "youtube" and a.mode == "api",
+    }
+
+
+@router.get("/posts/{post_id}/comments")
+def post_comments(post_id: str, ws: Workspace = Depends(read_ws), db: Session = Depends(get_db)):
+    """Top public comments (YouTube). Fetched live, not stored."""
+    p = db.get(Post, post_id)
+    if not p or p.agency_id != ws.agency.id:
+        raise ApiError("Post nahi mila.", 404)
+    a = db.get(SocialAccount, p.account_id)
+    if not a or a.platform != "youtube" or a.mode != "api" or not p.external_id:
+        raise ApiError("Comments abhi sirf live YouTube videos ke liye available hain.")
+    integ = resolve(db, a.agency_id)
+    own = integ["googleChannels"].get(a.external_id or "")
+    if own and own.get("refreshToken") and integ["googleApp"]:
+        key = "oauth:" + google_access_token(*integ["googleApp"], own["refreshToken"])
+    elif integ["youtubeApiKey"]:
+        key = integ["youtubeApiKey"]
+    else:
+        raise ApiError("YouTube connection available nahi hai.")
+    return fetch_comments(p.external_id, key)

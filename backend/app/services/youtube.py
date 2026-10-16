@@ -70,7 +70,7 @@ def fetch_youtube(raw: str, key: str) -> dict:
     if not ch:
         raise ApiError("YouTube channel nahi mila. Handle (@name) ya channel URL check karein.")
     uploads = ch["contentDetails"]["relatedPlaylists"]["uploads"]
-    ids = [i["contentDetails"]["videoId"] for i in _yt("playlistItems", {"part": "contentDetails", "playlistId": uploads, "maxResults": "30"}, key).get("items", [])]
+    ids = [i["contentDetails"]["videoId"] for i in _yt("playlistItems", {"part": "contentDetails", "playlistId": uploads, "maxResults": "50"}, key).get("items", [])]
     posts = []
     if ids:
         for v in _yt("videos", {"part": "snippet,statistics,contentDetails", "id": ",".join(ids)}, key).get("items", []):
@@ -92,3 +92,21 @@ def fetch_youtube(raw: str, key: str) -> dict:
         "totalViews": _num(stats.get("viewCount")),
         "posts": posts,
     }
+
+
+def fetch_comments(video_id: str, key: str, limit: int = 20) -> list[dict]:
+    """Top public comments of a video (read-only)."""
+    try:
+        data = _yt("commentThreads", {"part": "snippet", "videoId": video_id, "maxResults": str(limit), "order": "relevance",
+                                      "textFormat": "plainText"}, key)
+    except ApiError as e:
+        if "disabled comments" in str(e.detail).lower():
+            return []
+        raise
+    out = []
+    for t in data.get("items", []):
+        c = t["snippet"]["topLevelComment"]["snippet"]
+        out.append({"author": c.get("authorDisplayName"), "text": c.get("textDisplay") or c.get("textOriginal") or "",
+                    "likes": _num(c.get("likeCount")), "replies": _num(t["snippet"].get("totalReplyCount")),
+                    "publishedAt": (c.get("publishedAt") or "")[:10]})
+    return out
