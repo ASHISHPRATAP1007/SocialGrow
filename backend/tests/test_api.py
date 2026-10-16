@@ -303,7 +303,9 @@ class Api(unittest.TestCase):
     def test_65_client_connect_link_facebook_and_google_auto_add(self):
         # owner sets up Google once
         self.assertEqual(self.client.put(f"{API}/integrations/google-app", headers=self.agency, json={"clientId": "x", "clientSecret": "y"}).status_code, 403)
-        r = self.client.put(f"{API}/integrations/google-app", headers=self.owner, json={"clientId": "goog-123.apps", "clientSecret": "gsecret"})
+        bad = self.client.put(f"{API}/integrations/google-app", headers=self.owner, json={"clientId": "me@gmail.com", "clientSecret": "x"})
+        self.assertEqual(bad.status_code, 400)
+        r = self.client.put(f"{API}/integrations/google-app", headers=self.owner, json={"clientId": "goog-123.apps.googleusercontent.com", "clientSecret": "gsecret"})
         self.assertEqual(r.status_code, 200)
         owner_st = self.get("/integrations/status", self.owner).json()
         self.assertTrue(owner_st["google"]["redirectUri"].endswith("/api/v1/integrations/google/callback"))
@@ -336,7 +338,7 @@ class Api(unittest.TestCase):
         self.assertIn("added=2", loc)
         # --- Google: YouTube channel added, synced with its own login (no API key)
         url = self.client.get(f"{API}/public/connect/{token}/start?provider=google").json()["url"]
-        self.assertIn("client_id=goog-123.apps", url)
+        self.assertIn("client_id=goog-123.apps.googleusercontent.com", url)
         self.assertIn("access_type=offline", url)
         state = url.split("state=")[1].split("&")[0]
         yt = {"externalId": "UCgupta", "username": "guptabakery", "displayName": "Gupta Bakery", "followers": 120, "following": 0,
@@ -348,7 +350,7 @@ class Api(unittest.TestCase):
             res = self.client.get(f"{API}/integrations/google/callback?code=abc&state={state}", follow_redirects=False)
         self.assertIn("oauth=connected&provider=google", res.headers["location"])
         self.assertIn("added=1", res.headers["location"])
-        gat.assert_called_with("goog-123.apps", "gsecret", "rt")
+        gat.assert_called_with("goog-123.apps.googleusercontent.com", "gsecret", "rt")
         self.assertEqual(fy.call_args[0], ("UCgupta", "oauth:fresh"))
         accs = [a for a in self.get("/accounts", self.agency).json() if a["clientName"] == "Gupta Bakery"]
         self.assertEqual(sorted(a["platform"] for a in accs), ["facebook", "instagram", "youtube"])

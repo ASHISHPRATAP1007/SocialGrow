@@ -335,8 +335,13 @@ def save_google_app(body: GoogleAppIn, ws: Workspace = Depends(require_ws(ADMIN_
     """One-time owner setup: Google OAuth client for everyone's "Connect with Google"."""
     if not is_platform_admin(db, ws.user.id):
         raise ApiError("Sirf platform owner ye set kar sakta hai.", 403)
+    cid, secret = body.clientId.strip(), body.clientSecret.strip()
+    if cid and not cid.endswith(".apps.googleusercontent.com"):
+        raise ApiError("Ye Client ID nahi hai. Google Cloud → Credentials → OAuth 2.0 Client ID copy karein (…apps.googleusercontent.com par khatam hota hai).")
+    if cid and not secret:
+        raise ApiError("Client Secret bhi daalein.")
     s = db.scalar(select(PlatformSettings)) or PlatformSettings()
-    s.google_client_id, s.google_client_secret = body.clientId.strip() or None, body.clientSecret.strip() or None
+    s.google_client_id, s.google_client_secret = cid or None, secret or None
     s.updated_at = epoch_ms()
     db.add(s)
     db.commit()
