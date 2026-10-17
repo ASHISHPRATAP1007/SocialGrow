@@ -36,7 +36,7 @@ class Settings:
     # AI: gemini (free tier) | openai | anthropic
     AI_PROVIDER = env("AI_PROVIDER", "gemini").lower()
     GEMINI_API_KEY = env("GEMINI_API_KEY")
-    GEMINI_MODEL = env("GEMINI_MODEL", "gemini-2.5-flash")
+    GEMINI_MODEL = env("GEMINI_MODEL", "gemini-3.8-flash")
     OPENAI_API_KEY = env("OPENAI_API_KEY")
     OPENAI_MODEL = env("OPENAI_MODEL", "gpt-4o-mini")
     ANTHROPIC_API_KEY = env("ANTHROPIC_API_KEY")
