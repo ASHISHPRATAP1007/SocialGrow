@@ -16,9 +16,11 @@ export default function CalendarPage() {
   const me = useMe()
   const [month, setMonth] = useState(today().slice(0, 7))
   const [clientId, setClientId] = useState('')
-  const { data: items } = useApi('/content', { month, clientId })
   const { data: clients } = useApi('/clients')
   const client = clients?.find((c) => c.id === clientId)
+  // one client at a time — never mix clients in one calendar
+  const { data: allItems } = useApi(client ? '/content' : null, { month, clientId })
+  const items = allItems?.filter((x) => x.clientId === clientId)
 
   // remember the last client per browser; new items and AI plans default to it
   useEffect(() => {
@@ -30,6 +32,11 @@ export default function CalendarPage() {
       setAi((x) => ({ ...x, clientId: saved }))
     }
   }, [])
+  // no (valid) client chosen yet → open the first client
+  useEffect(() => {
+    if (clients?.length && !clients.some((c) => c.id === clientId)) pickClient(clients[0].id)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [clients, clientId])
   function pickClient(id) {
     setClientId(id)
     setF((x) => ({ ...x, clientId: id }))
@@ -68,22 +75,24 @@ export default function CalendarPage() {
       />
       <div className="mb-4 flex flex-wrap items-center gap-2">
         <span className="text-sm font-medium">Client:</span>
-        <button onClick={() => pickClient('')}
-          className={`rounded-full border px-3 py-1 text-sm ${!clientId ? 'border-primary bg-primary text-primary-foreground' : 'hover:bg-muted'}`}>Sab clients</button>
         {clients?.map((c) => (
           <button key={c.id} onClick={() => pickClient(c.id)}
             className={`rounded-full border px-3 py-1 text-sm ${clientId === c.id ? 'border-primary bg-primary text-primary-foreground' : 'hover:bg-muted'}`}>{c.name}</button>
         ))}
       </div>
 
-      {mode === 'add' && (
-        <Panel title="Add content item" className="mb-4">
+      {clients && clients.length === 0 && (
+        <p className="mb-4 rounded-md bg-warning-soft p-3 text-sm">Calendar client ke hisab se banta hai — pehle Clients page se ek client add karein.</p>
+      )}
+
+      {mode === 'add' && client && (
+        <Panel title={`Add content item — ${client?.name || ''}`} className="mb-4">
           <form
-            className="grid gap-3 sm:grid-cols-2 lg:grid-cols-6"
+            className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5"
             onSubmit={async (e) => {
               e.preventDefault()
               try {
-                await api.post('/content', { date: f.date, platform: f.platform, format: f.format, topic: f.topic, clientId: f.clientId || null })
+                await api.post('/content', { date: f.date, platform: f.platform, format: f.format, topic: f.topic, clientId })
                 toast.success('Added')
                 setF({ ...f, topic: '' })
                 setMonth(f.date.slice(0, 7))
@@ -104,26 +113,20 @@ export default function CalendarPage() {
                 {['Reel', 'Carousel', 'Story', 'Image', 'Video', 'Short', 'Live'].map((x) => <option key={x}>{x}</option>)}
               </select>
             </Field>
-            <Field label="Client">
-              <select className={selectClass} value={f.clientId} onChange={(e) => setF({ ...f, clientId: e.target.value })}>
-                <option value="">—</option>
-                {clients?.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-              </select>
-            </Field>
             <Field label="Topic"><Input required value={f.topic} onChange={(e) => setF({ ...f, topic: e.target.value })} /></Field>
             <div className="flex items-end"><Button type="submit">Add</Button></div>
           </form>
         </Panel>
       )}
-      {mode === 'ai' && (
-        <Panel title="AI content plan" className="mb-4">
+      {mode === 'ai' && client && (
+        <Panel title={`AI content plan — ${client?.name || ''}`} className="mb-4">
           <form
-            className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5"
+            className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4"
             onSubmit={async (e) => {
               e.preventDefault()
               setBusy(true)
               try {
-                const { data } = await api.post('/ai/calendar', { topic: ai.topic, platforms: ai.platforms, startDate: ai.startDate, days: Number(ai.days), clientId: ai.clientId || null })
+                const { data } = await api.post('/ai/calendar', { topic: ai.topic, platforms: ai.platforms, startDate: ai.startDate, days: Number(ai.days), clientId })
                 toast.success(`${data.count} ideas calendar mein add hue`)
                 setMonth(ai.startDate.slice(0, 7))
                 setMode('none')
@@ -135,14 +138,8 @@ export default function CalendarPage() {
               }
             }}
           >
-            <Field label="Business / topic" hint={ai.clientId ? 'Khaali chhod sakte hain — AI client aur uske accounts ka data dekh kar plan banayega' : undefined}>
-              <Input required={!ai.clientId} value={ai.topic} onChange={(e) => setAi({ ...ai, topic: e.target.value })} placeholder="Dental clinic in Lucknow" />
-            </Field>
-            <Field label="Client">
-              <select className={selectClass} value={ai.clientId} onChange={(e) => setAi({ ...ai, clientId: e.target.value })}>
-                <option value="">—</option>
-                {clients?.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-              </select>
+            <Field label="Business / topic" hint={clientId ? 'Khaali chhod sakte hain — AI client aur uske accounts ka data dekh kar plan banayega' : undefined}>
+              <Input required={!clientId} value={ai.topic} onChange={(e) => setAi({ ...ai, topic: e.target.value })} placeholder="Dental clinic in Lucknow" />
             </Field>
             <Field label="Start date"><Input type="date" value={ai.startDate} onChange={(e) => setAi({ ...ai, startDate: e.target.value })} /></Field>
             <Field label="Days"><Input type="number" min={7} max={31} value={ai.days} onChange={(e) => setAi({ ...ai, days: e.target.value })} /></Field>
@@ -156,7 +153,7 @@ export default function CalendarPage() {
                 ))}
               </div>
             </Field>
-            <div className="flex flex-wrap items-center gap-3 sm:col-span-2 lg:col-span-5">
+            <div className="flex flex-wrap items-center gap-3 sm:col-span-2 lg:col-span-4">
               <Button type="submit" disabled={busy}><Sparkles className="size-4" /> {busy ? 'Plan ban raha hai… (30-60 sec)' : 'Generate plan'}</Button>
               <span className="text-xs text-muted-foreground">Dobara banane par isi client ke purane (sirf "Idea" wale) items un dino ke liye badal jayenge.</span>
             </div>
@@ -212,7 +209,7 @@ export default function CalendarPage() {
                             )}
                           </div>
                           <div className="mt-0.5 line-clamp-2">{it.topic}</div>
-                          {!clientId && it.clientName && <div className="mt-0.5 truncate text-[10px] font-semibold text-primary">{it.clientName}</div>}
+                          
                         </div>
                       ))}
                     </div>
