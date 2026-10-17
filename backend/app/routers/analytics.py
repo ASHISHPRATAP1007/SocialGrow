@@ -185,11 +185,15 @@ def _yt_post(db: Session, ws: Workspace, post_id: str) -> tuple[Post, SocialAcco
     return p, a
 
 
-def _yt_access(db: Session, a: SocialAccount, write: bool = False) -> str:
-    """Read: the channel's own Google login if connected, else the platform API key. Write: own login with comment scope."""
+def _yt_access(db: Session, a: SocialAccount, write: bool = False, comments: bool = False) -> str:
+    """Read: the platform API key (public data), else the channel's own Google login. Comments with an OAuth token need the
+    force-ssl scope, so a read-only login falls back to the key. Write: own login with comment scope."""
     integ = resolve(db, a.agency_id)
     own = integ["googleChannels"].get(a.external_id or "")
-    if own and own.get("refreshToken") and integ["googleApp"]:
+    has_write = bool(own and WRITE_SCOPE in (own.get("scope") or ""))
+    if not write and integ["youtubeApiKey"] and (comments or not own):
+        return integ["youtubeApiKey"]
+    if own and own.get("refreshToken") and integ["googleApp"] and (write or not comments or has_write):
         if write and WRITE_SCOPE not in (own.get("scope") or ""):
             raise ApiError("Reply karne ke liye is channel ko Social Accounts → 'Connect with Google' se ek baar dobara jodein (comment permission ke saath).")
         return "oauth:" + google_access_token(*integ["googleApp"], own["refreshToken"])
@@ -218,13 +222,13 @@ def post_comments(post_id: str, pageToken: str | None = None, order: str = "rele
                   ws: Workspace = Depends(read_ws), db: Session = Depends(get_db)):
     """All public comments (paged, 50 at a time) with first replies. Fetched live, not stored."""
     p, a = _yt_post(db, ws, post_id)
-    return fetch_comments(p.external_id, _yt_access(db, a), pageToken, order)
+    return fetch_comments(p.external_id, _yt_access(db, a, comments=True), pageToken, order)
 
 
 @router.get("/posts/{post_id}/comments/{comment_id}/replies")
 def comment_replies(post_id: str, comment_id: str, ws: Workspace = Depends(read_ws), db: Session = Depends(get_db)):
     p, a = _yt_post(db, ws, post_id)
-    return fetch_replies(comment_id, _yt_access(db, a))
+    return fetch_replies(comment_id, _yt_access(db, a, comments=True))
 
 
 class CommentIn(BaseModel):

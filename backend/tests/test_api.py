@@ -385,7 +385,7 @@ class Api(unittest.TestCase):
              mock.patch("app.routers.analytics.fetch_comments", return_value={"items": [{"id": "c1", "text": "Nice"}], "nextPageToken": None}) as fc:
             r = self.get(f"/posts/{post_id}/comments", self.agency, params={"order": "time"})
         self.assertEqual(r.json()["items"][0]["text"], "Nice")
-        self.assertEqual(fc.call_args[0], ("vid1", "oauth:tok", None, "time"))
+        self.assertEqual(fc.call_args[0], ("vid1", "AIzaOWNERKEY1234", None, "time"))  # comments read with the API key
         # replying needs the comment permission — the old (read-only) Google login is refused with a clear message
         r = self.post(f"/posts/{post_id}/comments", self.agency, {"text": "Thanks!", "parentId": "c1"})
         self.assertEqual(r.status_code, 400)

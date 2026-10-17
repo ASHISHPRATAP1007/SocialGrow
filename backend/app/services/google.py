@@ -16,7 +16,7 @@ WRITE_SCOPE = "https://www.googleapis.com/auth/youtube.force-ssl"
 def oauth_url(client_id: str, redirect_uri: str, state: str) -> str:
     return f"{AUTH}?" + urlencode({
         "client_id": client_id, "redirect_uri": redirect_uri, "response_type": "code", "scope": SCOPE,
-        "access_type": "offline", "prompt": "consent select_account", "include_granted_scopes": "true", "state": state,
+        "access_type": "offline", "prompt": "consent", "include_granted_scopes": "true", "state": state,
     })
 
 
