@@ -110,8 +110,8 @@ function ConnectView() {
             <div className="mt-6 flex gap-2 rounded-md bg-muted p-3 text-xs text-muted-foreground">
               <ShieldCheck className="size-4 shrink-0 text-success" />
               <span>
-                Aapka password kisi ko nahi milta — login seedha Facebook / Google par hota hai. Agency aapka data <b>padh</b> sakti hai aur YouTube
-                comments ka <b>reply</b> kar sakti hai (sirf jab team khud likh kar bheje). Kuch delete ya apne aap post nahi hota. Kabhi bhi Facebook /
+                Aapka password kisi ko nahi milta — login seedha Facebook / Google par hota hai. Agency aapka data <b>padh</b> sakti hai aur YouTube par
+                comments ka <b>reply</b> / video <b>upload</b> kar sakti hai (sirf jab team khud kare). Kuch delete ya apne aap post nahi hota. Kabhi bhi Facebook /
                 Google settings se access hata sakte hain.
               </span>
             </div>

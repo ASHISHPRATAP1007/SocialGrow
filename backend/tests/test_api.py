@@ -406,6 +406,29 @@ class Api(unittest.TestCase):
         viewer = self.client.post(f"{API}/auth/login", json={"email": "viewer@test.dev", "password": PW}).json()["accessToken"]
         self.assertEqual(self.post(f"/posts/{post_id}/comments", {"Authorization": f"Bearer {viewer}"}, {"text": "x", "parentId": "c1"}).status_code, 403)
 
+    def test_67_youtube_upload_session(self):
+        acc = next(a for a in self.get("/accounts", self.agency).json() if a["username"] == "guptabakery" and a["platform"] == "youtube")
+        body = {"title": "Diwali offer", "description": "d", "tags": ["diwali"], "privacy": "public", "size": 1000, "mimeType": "video/mp4"}
+        self.assertFalse(self.get(f"/accounts/{acc['id']}/youtube/upload-status", self.agency).json()["canUpload"])
+        r = self.post(f"/accounts/{acc['id']}/youtube/upload-session", self.agency, body)
+        self.assertIn("upload permission", r.json()["detail"])
+        from app.models import Integration
+        with SessionLocal() as db:
+            row = db.query(Integration).filter(Integration.agency_id == self._agency_id(self.agency)).one()
+            row.google_channels = {k: {**v, "scope": "x https://www.googleapis.com/auth/youtube.upload"} for k, v in row.google_channels.items()}
+            db.commit()
+        self.assertTrue(self.get(f"/accounts/{acc['id']}/youtube/upload-status", self.agency).json()["canUpload"])
+        with mock.patch("app.routers.analytics.google_access_token", return_value="tok"), \
+             mock.patch("app.routers.analytics.start_upload", return_value="https://upload.example/session1") as su:
+            r = self.post(f"/accounts/{acc['id']}/youtube/upload-session", self.agency, {**body, "publishAt": "2099-01-01T10:00:00+05:30"})
+        self.assertEqual(r.json()["uploadUrl"], "https://upload.example/session1")
+        meta = su.call_args[0][1]
+        self.assertEqual(meta["status"]["privacyStatus"], "private")  # scheduled videos stay private until publishAt
+        self.assertEqual(meta["status"]["publishAt"], "2099-01-01T04:30:00Z")
+        self.assertEqual(su.call_args[0][2:4], (1000, "video/mp4"))
+        bad = self.post(f"/accounts/{acc['id']}/youtube/upload-session", self.agency, {**body, "mimeType": "image/png"})
+        self.assertEqual(bad.status_code, 400)
+
     def test_63_schema_self_updates_on_deploy(self):
         from sqlalchemy import create_engine, inspect, text
         import app.database as database

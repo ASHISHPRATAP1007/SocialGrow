@@ -1,3 +1,5 @@
+from datetime import datetime, timezone
+
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 from sqlalchemy import select
@@ -8,7 +10,8 @@ from ..core.lib import CONTENT_ROLES, ApiError, days_ago, pct_change, post_rate,
 from ..core.serialize import to_dict
 from ..database import get_db
 from ..models import Client, MetricDaily, Post, SocialAccount
-from ..services.google import WRITE_SCOPE
+from ..config import settings
+from ..services.google import UPLOAD_SCOPE, WRITE_SCOPE, start_upload
 from ..services.google import access_token as google_access_token
 from ..services.sync_service import resolve
 from ..services.youtube import fetch_comments, fetch_replies, fetch_video, post_comment, post_reply
@@ -247,3 +250,65 @@ def write_comment(post_id: str, body: CommentIn, ws: Workspace = Depends(require
     p, a = _yt_post(db, ws, post_id)
     token = _yt_access(db, a, write=True)[len("oauth:"):]
     return post_reply(body.parentId, text, token) if body.parentId else post_comment(p.external_id, text, token)
+
+
+# ---------------- upload a video to YouTube ----------------
+
+class UploadIn(BaseModel):
+    title: str
+    description: str = ""
+    tags: list[str] = []
+    privacy: str = "private"  # private | unlisted | public
+    publishAt: str | None = None  # ISO datetime — schedule (video stays private until then)
+    madeForKids: bool = False
+    categoryId: str = "22"  # People & Blogs
+    size: int
+    mimeType: str = "video/mp4"
+
+
+@router.get("/accounts/{account_id}/youtube/upload-status")
+def upload_status(account_id: str, ws: Workspace = Depends(read_ws), db: Session = Depends(get_db)):
+    a = db.get(SocialAccount, account_id)
+    if not a or a.agency_id != ws.agency.id:
+        raise ApiError("Account nahi mila.", 404)
+    own = resolve(db, a.agency_id)["googleChannels"].get(a.external_id or "") or {}
+    return {"youtube": a.platform == "youtube", "ownChannel": bool(own.get("refreshToken")),
+            "canUpload": bool(own.get("refreshToken") and UPLOAD_SCOPE in (own.get("scope") or ""))}
+
+
+@router.post("/accounts/{account_id}/youtube/upload-session")
+def upload_session(account_id: str, body: UploadIn, ws: Workspace = Depends(require_ws(CONTENT_ROLES)), db: Session = Depends(get_db)):
+    a = db.get(SocialAccount, account_id)
+    if not a or a.agency_id != ws.agency.id or a.platform != "youtube":
+        raise ApiError("YouTube account nahi mila.", 404)
+    title = body.title.strip()
+    if not title or len(title) > 100:
+        raise ApiError("Title 1–100 characters ka hona chahiye.")
+    if len(body.description) > 5000:
+        raise ApiError("Description max 5000 characters.")
+    if body.privacy not in ("private", "unlisted", "public"):
+        raise ApiError("Privacy galat hai.")
+    if body.size <= 0 or body.size > 256 * 1024**3:
+        raise ApiError("File size galat hai.")
+    if not body.mimeType.startswith("video/"):
+        raise ApiError("Sirf video file upload ho sakti hai.")
+    integ = resolve(db, a.agency_id)
+    own = integ["googleChannels"].get(a.external_id or "") or {}
+    if not (own.get("refreshToken") and UPLOAD_SCOPE in (own.get("scope") or "") and integ["googleApp"]):
+        raise ApiError("Upload ke liye is channel ko Social Accounts → 'Connect with Google' se dobara jodein (upload permission ke saath).")
+    status = {"privacyStatus": body.privacy, "selfDeclaredMadeForKids": body.madeForKids}
+    if body.publishAt:
+        try:
+            when = datetime.fromisoformat(body.publishAt.replace("Z", "+00:00"))
+        except ValueError:
+            raise ApiError("Schedule time galat hai.") from None
+        if when.tzinfo is None:
+            when = when.replace(tzinfo=timezone.utc)
+        if when <= datetime.now(timezone.utc):
+            raise ApiError("Schedule time future mein hona chahiye.")
+        status = {**status, "privacyStatus": "private", "publishAt": when.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")}
+    meta = {"snippet": {"title": title, "description": body.description, "tags": [t.strip() for t in body.tags if t.strip()][:30],
+                        "categoryId": body.categoryId}, "status": status}
+    token = google_access_token(*integ["googleApp"], own["refreshToken"])
+    url = start_upload(token, meta, body.size, body.mimeType, settings.FRONTEND_URL.rstrip("/"))
+    return {"uploadUrl": url}

@@ -9,6 +9,7 @@ import { toast } from 'sonner'
 import { api, refreshAll } from '@/lib/api'
 import { useApi } from '@/hooks/useApi'
 import { Button } from '@/components/ui/button'
+import { YoutubeUpload } from '@/components/youtube-upload'
 import { DemoBadge, EmptyState, LiveBadge, Loading, P_LABEL, PageHeader, Panel, PlatformBadge, Stat, can, errMsg, fmt, niceDate, useMe } from '@/components/sg'
 
 /** Full picture of one account — no date range, so quiet accounts still show everything. */
@@ -117,6 +118,8 @@ function AccountView() {
         <Stat label="Comments" value={fmt(l.comments)} hint={`avg ${l.avgComments.toFixed(1)} / post`} />
         <Stat label="Last post" value={l.lastPostAt ? niceDate(l.lastPostAt) : '—'} />
       </div>
+
+      {a.platform === 'youtube' && a.mode === 'api' && can(me.role, 'content') && <YoutubeUpload accountId={a.id} />}
 
       {data.posts.length === 0 ? (
         <EmptyState title="Abhi koi post nahi" text="Is account par post aate hi agle sync mein yahan dikhegi." />
