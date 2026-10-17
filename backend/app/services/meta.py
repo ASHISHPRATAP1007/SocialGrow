@@ -86,21 +86,37 @@ def _find_page(raw: str, page_tokens: dict) -> tuple[str, dict]:
     raise ApiError(f"Ye Page aapke connected Facebook account se managed nahi hai. Available pages: {names}")
 
 
+POST_FIELDS = ("id,from{id},message,story,created_time,permalink_url,shares,status_type,"
+               "reactions.summary(total_count).limit(0),comments.summary(total_count).limit(0)")
+
+
+def _page_posts(page_id: str, token: str) -> list[dict]:
+    """Page posts. Some (new Pages experience) pages return nothing on /posts, so fall back to
+    /published_posts and then /feed (only the page's own entries)."""
+    for edge in ("posts", "published_posts", "feed"):
+        try:
+            data = graph_get(f"{page_id}/{edge}", {"fields": POST_FIELDS, "limit": "50", "access_token": token}).get("data", [])
+        except ApiError:
+            continue
+        own = [p for p in data if (p.get("from") or {}).get("id", page_id) == page_id]
+        if own:
+            return own
+    return []
+
+
 def fetch_facebook(raw: str, page_tokens: dict) -> dict:
     page_id, page = _find_page(raw, page_tokens)
-    info = graph_get(page_id, {
-        "fields": "name,username,fan_count,followers_count,posts.limit(30){id,message,created_time,permalink_url,shares,"
-                  "reactions.summary(total_count).limit(0),comments.summary(total_count).limit(0)}",
-        "access_token": page["token"],
-    })
+    info = graph_get(page_id, {"fields": "name,username,fan_count,followers_count", "access_token": page["token"]})
+    posts = _page_posts(page_id, page["token"])
     return {
         "externalId": page_id, "username": info.get("username") or page.get("username") or page["name"], "displayName": info["name"],
         "followers": _num(info.get("followers_count") or info.get("fan_count")), "following": 0,
         "posts": [{
-            "externalId": p["id"], "title": title_from(p.get("message"), "Facebook post"), "format": "Post",
+            "externalId": p["id"], "title": title_from(p.get("message") or p.get("story"), "Facebook post"),
+            "format": {"added_video": "Video", "added_photos": "Image", "shared_story": "Link"}.get(p.get("status_type"), "Post"),
             "publishedAt": p["created_time"][:10], "views": 0,
             "likes": _num((p.get("reactions") or {}).get("summary", {}).get("total_count")),
             "comments": _num((p.get("comments") or {}).get("summary", {}).get("total_count")),
             "shares": _num((p.get("shares") or {}).get("count")), "url": p.get("permalink_url"),
-        } for p in (info.get("posts") or {}).get("data", [])],
+        } for p in posts],
     }

@@ -14,6 +14,9 @@ from .routers import admin, ai, analytics, auth, billing, entities, integrations
 from .workers.scheduler import run_task, scheduler_loop
 
 logging.basicConfig(level=logging.INFO)
+# httpx logs full URLs — those carry access tokens / app secrets, so keep them out of the logs
+logging.getLogger("httpx").setLevel(logging.WARNING)
+logging.getLogger("httpcore").setLevel(logging.WARNING)
 
 
 @asynccontextmanager
