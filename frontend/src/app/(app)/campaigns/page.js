@@ -8,6 +8,7 @@ import { useApi } from '@/hooks/useApi'
 import { Button, ButtonLink } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Bar, EmptyState, Field, Loading, PLATFORMS, P_LABEL, PageHeader, Panel, PlatformBadge, addDays, can, errMsg, inr, niceDate, selectClass, today, useMe } from '@/components/sg'
+import { ClientPicker } from '@/components/client-picker'
 
 const STATUS_CLASS = { planned: 'bg-secondary text-secondary-foreground', active: 'bg-success-soft text-success', completed: 'bg-muted text-muted-foreground' }
 
@@ -46,6 +47,7 @@ export default function CampaignsPage() {
             className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4"
             onSubmit={(e) => {
               e.preventDefault()
+              if (!f.clientId) return toast.error('Client chunein')
               act(
                 api.post('/campaigns', { ...f, budget: Number(f.budget) || 0, contentPlanned: Number(f.contentPlanned) || 0 }).then(() => setOpen(false)),
                 'Campaign ban gaya',
@@ -54,10 +56,7 @@ export default function CampaignsPage() {
           >
             <Field label="Campaign name"><Input required value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} /></Field>
             <Field label="Client">
-              <select className={selectClass} required value={f.clientId} onChange={(e) => setF({ ...f, clientId: e.target.value })}>
-                <option value="">Select</option>
-                {clients.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-              </select>
+              <ClientPicker clients={clients} value={f.clientId} onChange={(id) => setF({ ...f, clientId: id })} />
             </Field>
             <Field label="Platform">
               <select className={selectClass} value={f.platform} onChange={(e) => setF({ ...f, platform: e.target.value })}>

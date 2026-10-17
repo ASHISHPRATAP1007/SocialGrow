@@ -7,13 +7,16 @@ import { Sparkles, X } from 'lucide-react'
 import { api, refreshAll } from '@/lib/api'
 import { useApi } from '@/hooks/useApi'
 import { Button } from '@/components/ui/button'
+import { ClientPicker } from '@/components/client-picker'
 import { EmptyState, Loading, P_LABEL, PageHeader, Panel, PlatformBadge, errMsg, fmt, niceDate, selectClass } from '@/components/sg'
 
 export default function PostsPage() {
   const [days, setDays] = useState(0)
   const [platform, setPlatform] = useState('')
+  const [clientId, setClientId] = useState('')
+  const { data: clients } = useApi('/clients')
   const [sort, setSort] = useState('recent')
-  const { data: posts } = useApi('/posts', { days, platform, sort })
+  const { data: posts } = useApi('/posts', { days, platform, sort, clientId })
   const [active, setActive] = useState(null)
 
   async function runAnalysis(id, title) {
@@ -32,6 +35,7 @@ export default function PostsPage() {
     <>
       <PageHeader title="Post Analytics" subtitle="Har post ka performance aur account average se comparison" />
       <div className="mb-4 flex flex-wrap gap-2">
+        <ClientPicker className="w-56" clients={clients} value={clientId} allowAll onChange={setClientId} />
         <select className={selectClass + ' w-36'} value={days} onChange={(e) => setDays(Number(e.target.value))}>
           <option value={0}>All time</option>
           <option value={30}>Last 30 days</option>

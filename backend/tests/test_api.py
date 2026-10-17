@@ -378,6 +378,10 @@ class Api(unittest.TestCase):
         self.assertTrue(d["commentsSupported"])
         self.assertEqual(len(self.get("/posts", self.agency, params={"days": 90, "accountId": acc["id"]}).json()), 0)
         self.assertEqual(len(self.get("/posts", self.agency, params={"days": 0, "accountId": acc["id"]}).json()), 1)
+        gupta = next(c["id"] for c in self.get("/clients", self.agency).json() if c["name"] == "Gupta Bakery")
+        other = next(c["id"] for c in self.get("/clients", self.agency).json() if c["name"] != "Gupta Bakery")
+        self.assertEqual(len(self.get("/posts", self.agency, params={"days": 0, "clientId": gupta}).json()), 1)
+        self.assertEqual([p for p in self.get("/posts", self.agency, params={"days": 0, "clientId": other}).json() if p["title"] == "Old video"], [])
         ov = self.get("/analytics/overview", self.agency, params={"days": 30, "accountId": acc["id"]}).json()
         self.assertEqual(ov["quietAccounts"][0]["lastPostAt"], "2025-08-13")
         post_id = d["posts"][0]["id"]

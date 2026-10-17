@@ -9,6 +9,7 @@ import { useApi } from '@/hooks/useApi'
 import { Button, ButtonLink } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { EmptyState, Field, Loading, PageHeader, Panel, addDays, can, errMsg, niceDate, selectClass, today, useMe } from '@/components/sg'
+import { ClientPicker } from '@/components/client-picker'
 
 const TYPES = { Monthly: 30, Weekly: 7, Campaign: 30, Platform: 30 }
 
@@ -40,6 +41,7 @@ export default function ReportsPage() {
             className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5"
             onSubmit={async (e) => {
               e.preventDefault()
+              if (!f.clientId) return toast.error('Client chunein')
               setBusy(true)
               try {
                 const { data } = await api.post('/reports', f)
@@ -54,10 +56,7 @@ export default function ReportsPage() {
             }}
           >
             <Field label="Client">
-              <select className={selectClass} required value={f.clientId} onChange={(e) => setF({ ...f, clientId: e.target.value })}>
-                <option value="">Select client</option>
-                {clients.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-              </select>
+              <ClientPicker clients={clients} value={f.clientId} onChange={(id) => setF({ ...f, clientId: id })} />
             </Field>
             <Field label="Report type">
               <select

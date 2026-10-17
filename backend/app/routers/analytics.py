@@ -91,7 +91,7 @@ def overview(days: int = 30, clientId: str | None = None, projectId: str | None 
 
 
 @router.get("/posts")
-def posts_list(days: int = 90, sort: str = "recent", platform: str | None = None, accountId: str | None = None,
+def posts_list(days: int = 90, sort: str = "recent", platform: str | None = None, accountId: str | None = None, clientId: str | None = None,
                ws: Workspace = Depends(read_ws), db: Session = Depends(get_db)):
     q = select(Post).where(Post.agency_id == ws.agency.id)
     if days and days > 0:  # 0 = all time
@@ -104,9 +104,9 @@ def posts_list(days: int = 90, sort: str = "recent", platform: str | None = None
         avg[aid] = sum(rates) / len(rates) if rates else 0
     rows = []
     for p in posts:
-        if (platform and p.platform != platform) or (accountId and p.account_id != accountId):
-            continue
         a = accounts.get(p.account_id)
+        if (platform and p.platform != platform) or (accountId and p.account_id != accountId) or (clientId and (not a or a.client_id != clientId)):
+            continue
         rate = post_rate(p, a.followers if a else None) / 100
         base = avg.get(p.account_id, 0)
         perf = "average" if base == 0 else "above" if rate > base * 1.1 else "below" if rate < base * 0.9 else "average"

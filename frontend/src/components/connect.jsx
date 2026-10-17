@@ -8,6 +8,7 @@ import { api, refreshAll } from '@/lib/api'
 import { useApi } from '@/hooks/useApi'
 import { Button } from '@/components/ui/button'
 import { Field, P_LABEL, Panel, PlatformBadge, errMsg, selectClass } from '@/components/sg'
+import { ClientPicker } from '@/components/client-picker'
 
 const NAME = { facebook: 'Facebook', google: 'Google (YouTube)' }
 
@@ -126,10 +127,7 @@ export function ConnectPanel({ clients, status }) {
         <>
           <div className="max-w-sm">
             <Field label="1. Kis client ke accounts?">
-              <select className={selectClass} value={clientId} onChange={(e) => { setClientId(e.target.value); setLink(null) }}>
-                <option value="">Client chunein</option>
-                {clients.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-              </select>
+              <ClientPicker clients={clients} value={clientId} onChange={(id) => { setClientId(id); setLink(null) }} />
             </Field>
           </div>
           <div className="mt-4 grid gap-3 md:grid-cols-2">

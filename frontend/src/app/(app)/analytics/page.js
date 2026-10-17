@@ -5,6 +5,7 @@ import Link from 'next/link'
 import { Bar, BarChart, CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import { useApi } from '@/hooks/useApi'
 import { SourceBadges, EmptyState, Loading, P_LABEL, PageHeader, Panel, PlatformBadge, Stat, fmt, selectClass } from '@/components/sg'
+import { ClientPicker } from '@/components/client-picker'
 
 const RANGES = [
   { label: '7 Days', days: 7 },
@@ -38,10 +39,7 @@ export default function AnalyticsPage() {
             </button>
           ))}
         </div>
-        <select className={selectClass + ' w-40'} value={clientId} onChange={(e) => { setClientId(e.target.value); setAccountId('') }}>
-          <option value="">All clients</option>
-          {clients?.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-        </select>
+        <ClientPicker className="w-52" clients={clients} value={clientId} allowAll onChange={(id) => { setClientId(id); setAccountId('') }} />
         <select className={selectClass + ' w-36'} value={platform} onChange={(e) => setPlatform(e.target.value)}>
           <option value="">All platforms</option>
           {['instagram', 'facebook', 'youtube'].map((p) => <option key={p} value={p}>{P_LABEL[p]}</option>)}

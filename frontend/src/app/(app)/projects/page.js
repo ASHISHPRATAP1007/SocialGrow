@@ -8,6 +8,7 @@ import { useApi } from '@/hooks/useApi'
 import { Button, ButtonLink } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { EmptyState, Field, Loading, PLATFORMS, P_LABEL, PageHeader, Panel, PlatformBadge, addDays, can, errMsg, niceDate, selectClass, today, useMe } from '@/components/sg'
+import { ClientPicker } from '@/components/client-picker'
 
 export default function ProjectsPage() {
   const me = useMe()
@@ -63,10 +64,7 @@ export default function ProjectsPage() {
             }}
           >
             <Field label="Client *">
-              <select className={selectClass} value={form.clientId} onChange={(e) => setForm({ ...form, clientId: e.target.value })} required>
-                <option value="">Select client</option>
-                {clients.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-              </select>
+              <ClientPicker clients={clients} value={form.clientId} onChange={(id) => setForm({ ...form, clientId: id })} />
             </Field>
             <Field label="Project name *">
               <Input required value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="ABC Hospital Social Growth" />

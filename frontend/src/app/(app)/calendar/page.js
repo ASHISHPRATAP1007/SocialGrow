@@ -8,6 +8,7 @@ import { useApi } from '@/hooks/useApi'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Field, Loading, PLATFORMS, P_LABEL, PageHeader, Panel, PlatformBadge, can, errMsg, selectClass, today, useMe } from '@/components/sg'
+import { ClientPicker } from '@/components/client-picker'
 
 const STATUS_NEXT = { idea: 'scheduled', scheduled: 'published', published: 'idea' }
 const STATUS_CLASS = { idea: 'border-l-muted-foreground', scheduled: 'border-l-primary', published: 'border-l-success' }
@@ -75,10 +76,7 @@ export default function CalendarPage() {
       />
       <div className="mb-4 flex flex-wrap items-center gap-2">
         <span className="text-sm font-medium">Client:</span>
-        {clients?.map((c) => (
-          <button key={c.id} onClick={() => pickClient(c.id)}
-            className={`rounded-full border px-3 py-1 text-sm ${clientId === c.id ? 'border-primary bg-primary text-primary-foreground' : 'hover:bg-muted'}`}>{c.name}</button>
-        ))}
+        <ClientPicker className="w-64" clients={clients} value={clientId} onChange={pickClient} />
       </div>
 
       {clients && clients.length === 0 && (
