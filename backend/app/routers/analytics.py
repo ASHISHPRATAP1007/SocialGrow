@@ -11,10 +11,9 @@ from ..core.serialize import to_dict
 from ..database import get_db
 from ..models import Client, MetricDaily, Post, SocialAccount
 from ..config import settings
-from ..services.google import UPLOAD_SCOPE, WRITE_SCOPE, start_upload
+from ..services.google import UPLOAD_SCOPE, start_upload
 from ..services.google import access_token as google_access_token
 from ..services.sync_service import resolve
-from ..services.youtube import fetch_comments, fetch_replies, fetch_video, post_comment, post_reply
 
 router = APIRouter(tags=["analytics"])
 
@@ -174,82 +173,8 @@ def account_details(account_id: str, ws: Workspace = Depends(read_ws), db: Sessi
                     for f in formats.values()],
         "history": [{"date": h.date, "followers": h.followers, "views": h.views} for h in history],
         "posts": rows,
-        "commentsSupported": a.platform == "youtube" and a.mode == "api",
+        "commentsSupported": a.mode == "api",
     }
-
-
-def _yt_post(db: Session, ws: Workspace, post_id: str) -> tuple[Post, SocialAccount]:
-    p = db.get(Post, post_id)
-    if not p or p.agency_id != ws.agency.id:
-        raise ApiError("Post nahi mila.", 404)
-    a = db.get(SocialAccount, p.account_id)
-    if not a or a.platform != "youtube" or a.mode != "api" or not p.external_id:
-        raise ApiError("Ye feature abhi sirf live YouTube videos ke liye hai.")
-    return p, a
-
-
-def _yt_access(db: Session, a: SocialAccount, write: bool = False, comments: bool = False) -> str:
-    """Read: the platform API key (public data), else the channel's own Google login. Comments with an OAuth token need the
-    force-ssl scope, so a read-only login falls back to the key. Write: own login with comment scope."""
-    integ = resolve(db, a.agency_id)
-    own = integ["googleChannels"].get(a.external_id or "")
-    has_write = bool(own and WRITE_SCOPE in (own.get("scope") or ""))
-    if not write and integ["youtubeApiKey"] and (comments or not own):
-        return integ["youtubeApiKey"]
-    if own and own.get("refreshToken") and integ["googleApp"] and (write or not comments or has_write):
-        if write and WRITE_SCOPE not in (own.get("scope") or ""):
-            raise ApiError("Reply karne ke liye is channel ko Social Accounts → 'Connect with Google' se ek baar dobara jodein (comment permission ke saath).")
-        return "oauth:" + google_access_token(*integ["googleApp"], own["refreshToken"])
-    if write:
-        raise ApiError("Reply sirf apne channel par ho sakta hai — channel ko 'Connect with Google' se jodein.")
-    if integ["youtubeApiKey"]:
-        return integ["youtubeApiKey"]
-    raise ApiError("YouTube connection available nahi hai.")
-
-
-def _can_reply(db: Session, a: SocialAccount) -> bool:
-    own = resolve(db, a.agency_id)["googleChannels"].get(a.external_id or "") or {}
-    return bool(own.get("refreshToken") and WRITE_SCOPE in (own.get("scope") or ""))
-
-
-@router.get("/posts/{post_id}/video")
-def post_video(post_id: str, ws: Workspace = Depends(read_ws), db: Session = Depends(get_db)):
-    p, a = _yt_post(db, ws, post_id)
-    v = fetch_video(p.external_id, _yt_access(db, a))
-    return {**v, "postId": p.id, "accountId": a.id, "username": a.username, "canReply": _can_reply(db, a),
-            "ownChannel": bool((resolve(db, a.agency_id)["googleChannels"].get(a.external_id or "") or {}).get("refreshToken"))}
-
-
-@router.get("/posts/{post_id}/comments")
-def post_comments(post_id: str, pageToken: str | None = None, order: str = "relevance",
-                  ws: Workspace = Depends(read_ws), db: Session = Depends(get_db)):
-    """All public comments (paged, 50 at a time) with first replies. Fetched live, not stored."""
-    p, a = _yt_post(db, ws, post_id)
-    return fetch_comments(p.external_id, _yt_access(db, a, comments=True), pageToken, order)
-
-
-@router.get("/posts/{post_id}/comments/{comment_id}/replies")
-def comment_replies(post_id: str, comment_id: str, ws: Workspace = Depends(read_ws), db: Session = Depends(get_db)):
-    p, a = _yt_post(db, ws, post_id)
-    return fetch_replies(comment_id, _yt_access(db, a, comments=True))
-
-
-class CommentIn(BaseModel):
-    text: str
-    parentId: str | None = None
-
-
-@router.post("/posts/{post_id}/comments")
-def write_comment(post_id: str, body: CommentIn, ws: Workspace = Depends(require_ws(CONTENT_ROLES)), db: Session = Depends(get_db)):
-    """Reply to a comment (parentId) or add a new comment, as the connected channel."""
-    text = body.text.strip()
-    if not text:
-        raise ApiError("Reply likhein.")
-    if len(text) > 5000:
-        raise ApiError("Reply bahut lamba hai (max 5000 characters).")
-    p, a = _yt_post(db, ws, post_id)
-    token = _yt_access(db, a, write=True)[len("oauth:"):]
-    return post_reply(body.parentId, text, token) if body.parentId else post_comment(p.external_id, text, token)
 
 
 # ---------------- upload a video to YouTube ----------------

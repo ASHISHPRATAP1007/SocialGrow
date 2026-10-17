@@ -10,7 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from .config import settings
 from .core.lib import ApiError
 from .database import init_db
-from .routers import admin, ai, analytics, auth, billing, entities, integrations, seed, workspace
+from .routers import admin, ai, analytics, auth, billing, engage, entities, integrations, seed, workspace
 from .workers.scheduler import run_task, scheduler_loop
 
 logging.basicConfig(level=logging.INFO)
@@ -38,7 +38,7 @@ app.add_middleware(
 )
 
 API = "/api/v1"
-for r in (auth, workspace, entities, seed, analytics, ai, integrations, billing, admin):
+for r in (auth, workspace, entities, seed, analytics, engage, ai, integrations, billing, admin):
     app.include_router(r.router, prefix=API)
 
 

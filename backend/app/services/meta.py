@@ -10,7 +10,9 @@ from .youtube import _num, title_from
 
 GRAPH = "https://graph.facebook.com/v23.0"
 DIALOG = "https://www.facebook.com/v23.0/dialog/oauth"
-SCOPES = "pages_show_list,pages_read_engagement,instagram_basic,instagram_manage_insights,business_management"
+# read analytics + read/reply comments on the Page and its Instagram
+SCOPES = ("pages_show_list,pages_read_engagement,pages_read_user_content,pages_manage_engagement,"
+          "instagram_basic,instagram_manage_insights,instagram_manage_comments,business_management")
 
 
 def graph_get(path: str, params: dict) -> dict:
@@ -20,6 +22,14 @@ def graph_get(path: str, params: dict) -> dict:
     if r.status_code >= 400 or data.get("error"):
         raise ApiError(f"Meta: {data.get('error', {}).get('message', r.reason_phrase)}")
     return data
+
+
+def graph_post(path: str, data: dict) -> dict:
+    r = httpx.post(f"{GRAPH}/{path}", data=data, timeout=30)
+    body = r.json()
+    if r.status_code >= 400 or body.get("error"):
+        raise ApiError(f"Meta: {body.get('error', {}).get('message', r.reason_phrase)}")
+    return body
 
 
 def oauth_url(app_id: str, redirect_uri: str, state: str) -> str:
@@ -120,3 +130,113 @@ def fetch_facebook(raw: str, page_tokens: dict) -> dict:
             "shares": _num((p.get("shares") or {}).get("count")), "url": p.get("permalink_url"),
         } for p in posts],
     }
+
+
+# ---------------- single post + comments (Page token) ----------------
+
+def _when(ts: str | None) -> str:
+    return (ts or "")[:16].replace("T", " ")
+
+
+def fb_post(post_id: str, token: str) -> dict:
+    p = graph_get(post_id, {"fields": "message,story,created_time,permalink_url,full_picture,status_type,shares,"
+                                      "attachments{media_type,media,url,subattachments{media_type,media,url}},"
+                                      "reactions.summary(total_count).limit(0),comments.summary(total_count).limit(0)",
+                            "access_token": token})
+    media = []
+    for a in (p.get("attachments") or {}).get("data", []):
+        subs = (a.get("subattachments") or {}).get("data") or [a]
+        for s_ in subs:
+            img = ((s_.get("media") or {}).get("image") or {}).get("src")
+            video = (s_.get("media") or {}).get("source")
+            if video:
+                media.append({"type": "video", "url": video, "thumbnail": img})
+            elif img:
+                media.append({"type": "image", "url": img})
+    if not media and p.get("full_picture"):
+        media.append({"type": "image", "url": p["full_picture"]})
+    return {"text": p.get("message") or p.get("story") or "", "publishedAt": (p.get("created_time") or "")[:10], "url": p.get("permalink_url"),
+            "media": media, "likes": _num((p.get("reactions") or {}).get("summary", {}).get("total_count")),
+            "comments": _num((p.get("comments") or {}).get("summary", {}).get("total_count")),
+            "shares": _num((p.get("shares") or {}).get("count")), "views": 0}
+
+
+def _fb_comment(c: dict) -> dict:
+    who = c.get("from") or {}
+    return {"id": c["id"], "author": who.get("name") or "Facebook user",
+            "authorImage": ((who.get("picture") or {}).get("data") or {}).get("url"),
+            "text": c.get("message") or "", "likes": _num(c.get("like_count")), "publishedAt": _when(c.get("created_time")),
+            "replyCount": _num(c.get("comment_count")), "replies": []}
+
+
+FB_C_FIELDS = "id,from{name,picture},message,created_time,like_count,comment_count"
+
+
+def fb_comments(post_id: str, token: str, after: str | None = None, order: str = "relevance") -> dict:
+    params = {"fields": FB_C_FIELDS, "filter": "toplevel", "limit": "50", "access_token": token,
+              "order": "reverse_chronological" if order == "time" else "ranked"}
+    if after:
+        params["after"] = after
+    data = graph_get(f"{post_id}/comments", params)
+    nxt = (data.get("paging") or {}).get("cursors", {}).get("after") if (data.get("paging") or {}).get("next") else None
+    return {"items": [_fb_comment(c) for c in data.get("data", [])], "nextPageToken": nxt, "disabled": False}
+
+
+def fb_replies(comment_id: str, token: str) -> list[dict]:
+    data = graph_get(f"{comment_id}/comments", {"fields": FB_C_FIELDS, "limit": "100", "access_token": token})
+    return [_fb_comment(c) for c in data.get("data", [])]
+
+
+def fb_write(target_id: str, text: str, token: str) -> dict:
+    """Comment on a post (target = post id) or reply to a comment (target = comment id), as the Page."""
+    new_id = graph_post(f"{target_id}/comments", {"message": text, "access_token": token})["id"]
+    try:
+        return _fb_comment(graph_get(new_id, {"fields": FB_C_FIELDS, "access_token": token}))
+    except ApiError:
+        return {"id": new_id, "author": "Aapka Page", "text": text, "likes": 0, "publishedAt": "abhi", "replyCount": 0, "replies": []}
+
+
+def ig_media(media_id: str, token: str) -> dict:
+    m = graph_get(media_id, {"fields": "caption,media_type,media_product_type,media_url,thumbnail_url,permalink,timestamp,like_count,comments_count,"
+                                       "children{media_type,media_url,thumbnail_url}", "access_token": token})
+
+    def one(x: dict) -> dict:
+        return {"type": "video" if x.get("media_type") == "VIDEO" else "image", "url": x.get("media_url"), "thumbnail": x.get("thumbnail_url")}
+
+    kids = (m.get("children") or {}).get("data") or []
+    return {"text": m.get("caption") or "", "publishedAt": (m.get("timestamp") or "")[:10], "url": m.get("permalink"),
+            "media": [one(k) for k in kids] if kids else ([one(m)] if m.get("media_url") else []),
+            "likes": _num(m.get("like_count")), "comments": _num(m.get("comments_count")), "shares": 0, "views": 0}
+
+
+def _ig_comment(c: dict) -> dict:
+    replies = [_ig_comment(r) for r in (c.get("replies") or {}).get("data", [])]
+    return {"id": c["id"], "author": c.get("username") or "instagram user", "authorImage": None, "text": c.get("text") or "",
+            "likes": _num(c.get("like_count")), "publishedAt": _when(c.get("timestamp")), "replyCount": len(replies), "replies": replies}
+
+
+IG_C_FIELDS = "id,text,username,timestamp,like_count"
+
+
+def ig_comments(media_id: str, token: str, after: str | None = None) -> dict:
+    params = {"fields": f"{IG_C_FIELDS},replies{{{IG_C_FIELDS}}}", "limit": "50", "access_token": token}
+    if after:
+        params["after"] = after
+    data = graph_get(f"{media_id}/comments", params)
+    nxt = (data.get("paging") or {}).get("cursors", {}).get("after") if (data.get("paging") or {}).get("next") else None
+    return {"items": [_ig_comment(c) for c in data.get("data", [])], "nextPageToken": nxt, "disabled": False}
+
+
+def ig_replies(comment_id: str, token: str) -> list[dict]:
+    data = graph_get(f"{comment_id}/replies", {"fields": IG_C_FIELDS, "limit": "100", "access_token": token})
+    return [_ig_comment(c) for c in data.get("data", [])]
+
+
+def ig_write(media_id: str, parent_id: str | None, text: str, token: str) -> dict:
+    """New comment on own media, or reply to a comment, as the Instagram account."""
+    path = f"{parent_id}/replies" if parent_id else f"{media_id}/comments"
+    new_id = graph_post(path, {"message": text, "access_token": token})["id"]
+    try:
+        return _ig_comment(graph_get(new_id, {"fields": IG_C_FIELDS, "access_token": token}))
+    except ApiError:
+        return {"id": new_id, "author": "aap", "text": text, "likes": 0, "publishedAt": "abhi", "replyCount": 0, "replies": []}

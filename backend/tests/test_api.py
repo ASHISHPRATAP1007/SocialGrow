@@ -381,8 +381,8 @@ class Api(unittest.TestCase):
         ov = self.get("/analytics/overview", self.agency, params={"days": 30, "accountId": acc["id"]}).json()
         self.assertEqual(ov["quietAccounts"][0]["lastPostAt"], "2025-08-13")
         post_id = d["posts"][0]["id"]
-        with mock.patch("app.routers.analytics.google_access_token", return_value="tok"), \
-             mock.patch("app.routers.analytics.fetch_comments", return_value={"items": [{"id": "c1", "text": "Nice"}], "nextPageToken": None}) as fc:
+        with mock.patch("app.routers.engage.google_access_token", return_value="tok"), \
+             mock.patch("app.routers.engage.youtube.fetch_comments", return_value={"items": [{"id": "c1", "text": "Nice"}], "nextPageToken": None}) as fc:
             r = self.get(f"/posts/{post_id}/comments", self.agency, params={"order": "time"})
         self.assertEqual(r.json()["items"][0]["text"], "Nice")
         self.assertEqual(fc.call_args[0], ("vid1", "AIzaOWNERKEY1234", None, "time"))  # comments read with the API key
@@ -396,13 +396,17 @@ class Api(unittest.TestCase):
             row = db.query(Integration).filter(Integration.agency_id == self._agency_id(self.agency)).one()
             row.google_channels = {k: {**v, "scope": "https://www.googleapis.com/auth/youtube.force-ssl"} for k, v in row.google_channels.items()}
             db.commit()
-        with mock.patch("app.routers.analytics.google_access_token", return_value="tok"), \
-             mock.patch("app.routers.analytics.post_reply", return_value={"id": "r1", "text": "Thanks!"}) as pr, \
-             mock.patch("app.routers.analytics.fetch_video", return_value={"id": "vid1", "title": "Old video"}):
+        video = {"id": "vid1", "title": "Old video", "description": "", "publishedAt": "2025-08-13", "url": "u", "durationSeconds": 60,
+                 "channelTitle": "G", "views": 1, "likes": 1, "comments": 1}
+        with mock.patch("app.routers.engage.google_access_token", return_value="tok"), \
+             mock.patch("app.routers.engage.youtube.post_reply", return_value={"id": "r1", "text": "Thanks!"}) as pr, \
+             mock.patch("app.routers.engage.youtube.fetch_video", return_value=video):
             r = self.post(f"/posts/{post_id}/comments", self.agency, {"text": "Thanks!", "parentId": "c1"})
             self.assertEqual(r.json()["id"], "r1")
             pr.assert_called_with("c1", "Thanks!", "tok")
-            self.assertTrue(self.get(f"/posts/{post_id}/video", self.agency).json()["canReply"])
+            d = self.get(f"/posts/{post_id}/detail", self.agency).json()
+            self.assertTrue(d["canReply"])
+            self.assertEqual(d["embedId"], "vid1")
         viewer = self.client.post(f"{API}/auth/login", json={"email": "viewer@test.dev", "password": PW}).json()["accessToken"]
         self.assertEqual(self.post(f"/posts/{post_id}/comments", {"Authorization": f"Bearer {viewer}"}, {"text": "x", "parentId": "c1"}).status_code, 403)
 
@@ -428,6 +432,42 @@ class Api(unittest.TestCase):
         self.assertEqual(su.call_args[0][2:4], (1000, "video/mp4"))
         bad = self.post(f"/accounts/{acc['id']}/youtube/upload-session", self.agency, {**body, "mimeType": "image/png"})
         self.assertEqual(bad.status_code, 400)
+
+    def test_68_facebook_instagram_comments_reply_and_ai_suggestions(self):
+        accs = {a["platform"]: a for a in self.get("/accounts", self.agency).json() if a["clientName"] == "Gupta Bakery"}
+        from app.models import Post as P
+        with SessionLocal() as db:
+            ag = self._agency_id(self.agency)
+            fb = P(agency_id=ag, account_id=accs["facebook"]["id"], platform="facebook", format="Post", title="Kaju katli",
+                   published_at="2026-10-16", external_id="333_1", views=0, likes=5, comments=1, shares=0)
+            ig = P(agency_id=ag, account_id=accs["instagram"]["id"], platform="instagram", format="Reel", title="Reel",
+                   published_at="2026-10-16", external_id="IGM1", views=0, likes=9, comments=1, shares=0)
+            db.add_all([fb, ig])
+            db.commit()
+            fb_id, ig_id = fb.id, ig.id
+        # Facebook: detail + comments + reply use the Page's own token
+        with mock.patch("app.routers.engage.meta.fb_post", return_value={"text": "Kaju katli", "publishedAt": "2026-10-16", "url": "u",
+                        "media": [{"type": "image", "url": "img"}], "likes": 5, "comments": 1, "shares": 0, "views": 0}) as fp:
+            d = self.get(f"/posts/{fb_id}/detail", self.agency).json()
+        self.assertTrue(d["canReply"])
+        self.assertEqual(fp.call_args[0], ("333_1", "PT3"))
+        with mock.patch("app.routers.engage.meta.fb_write", return_value={"id": "c9", "text": "Dhanyavaad!"}) as fw:
+            self.post(f"/posts/{fb_id}/comments", self.agency, {"text": "Dhanyavaad!", "parentId": "c1"})
+        fw.assert_called_with("c1", "Dhanyavaad!", "PT3")
+        # Instagram: reply goes to /{comment}/replies via the linked Page token
+        with mock.patch("app.routers.engage.meta.ig_write", return_value={"id": "i9"}) as iw:
+            self.post(f"/posts/{ig_id}/comments", self.agency, {"text": "Thank you", "parentId": "ic1"})
+        iw.assert_called_with("IGM1", "ic1", "Thank you", "PT3")
+        # missing permission → clear "reconnect" message
+        from app.core.lib import ApiError
+        with mock.patch("app.routers.engage.meta.fb_comments", side_effect=ApiError("Meta: (#10) Requires pages_read_user_content permission")):
+            r = self.get(f"/posts/{fb_id}/comments", self.agency)
+        self.assertIn("Connect with Facebook", r.json()["detail"])
+        # AI reply suggestions in the comment's language
+        with mock.patch("app.routers.engage.llm", return_value='["Bahut shukriya! 😊", "Thank you ji", "Aapka pyaar 🙏"]') as lm:
+            r = self.post(f"/posts/{fb_id}/ai-reply", self.agency, {"comment": "Bahut tasty hai!", "author": "Rahul"})
+        self.assertEqual(len(r.json()["options"]), 3)
+        self.assertIn("SAME language", lm.call_args[0][0])
 
     def test_63_schema_self_updates_on_deploy(self):
         from sqlalchemy import create_engine, inspect, text

@@ -93,7 +93,7 @@ export default function PostsPage() {
                 <span className="text-xs text-muted-foreground">{niceDate(p.publishedAt)}</span>
               </div>
               <div className="mt-2 font-semibold">
-                {p.platform === 'youtube' && p.live
+                {p.live
                   ? <Link href={`/post?id=${p.id}`} className="hover:text-primary hover:underline">▶ {p.title}</Link>
                   : p.url ? <a href={p.url} target="_blank" rel="noreferrer" className="hover:text-primary hover:underline">{p.title}</a> : p.title}
               </div>
