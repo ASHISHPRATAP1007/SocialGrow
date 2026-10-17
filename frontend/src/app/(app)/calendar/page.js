@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { toast } from 'sonner'
 import { ChevronLeft, ChevronRight, Plus, Sparkles, Trash2 } from 'lucide-react'
 import { api, refreshAll } from '@/lib/api'
@@ -15,8 +15,27 @@ const STATUS_CLASS = { idea: 'border-l-muted-foreground', scheduled: 'border-l-p
 export default function CalendarPage() {
   const me = useMe()
   const [month, setMonth] = useState(today().slice(0, 7))
-  const { data: items } = useApi('/content', { month })
+  const [clientId, setClientId] = useState('')
+  const { data: items } = useApi('/content', { month, clientId })
   const { data: clients } = useApi('/clients')
+  const client = clients?.find((c) => c.id === clientId)
+
+  // remember the last client per browser; new items and AI plans default to it
+  useEffect(() => {
+    let saved = ''
+    try { saved = localStorage.getItem('sg_cal_client') || '' } catch { /* storage blocked */ }
+    if (saved) {
+      setClientId(saved)
+      setF((x) => ({ ...x, clientId: saved }))
+      setAi((x) => ({ ...x, clientId: saved }))
+    }
+  }, [])
+  function pickClient(id) {
+    setClientId(id)
+    setF((x) => ({ ...x, clientId: id }))
+    setAi((x) => ({ ...x, clientId: id }))
+    try { localStorage.setItem('sg_cal_client', id) } catch { /* storage blocked */ }
+  }
   const [mode, setMode] = useState('none')
   const [f, setF] = useState({ date: today(), platform: 'instagram', format: 'Reel', topic: '', clientId: '' })
   const [ai, setAi] = useState({ topic: '', clientId: '', platforms: ['instagram'], startDate: today(), days: '30' })
@@ -34,19 +53,29 @@ export default function CalendarPage() {
   return (
     <>
       <PageHeader
-        title="Content Calendar"
-        subtitle="Ideas → Scheduled → Published. Card par click karke status badlein."
+        title={client ? `Content Calendar — ${client.name}` : 'Content Calendar'}
+        subtitle="Har client ka apna calendar. Ideas → Scheduled → Published — card par click karke status badlein."
         actions={
           edit && (
             <>
               <Button variant="outline" onClick={() => setMode(mode === 'add' ? 'none' : 'add')}><Plus className="size-4" /> Add item</Button>
-              <Button onClick={() => setMode(mode === 'ai' ? 'none' : 'ai')} disabled={!me.limits.aiContent} title={me.limits.aiContent ? '' : 'Pro plan feature'}>
-                <Sparkles className="size-4" /> AI 30-day plan
+              <Button onClick={() => { setAi((x) => ({ ...x, clientId })); setMode(mode === 'ai' ? 'none' : 'ai') }} disabled={!me.limits.aiContent} title={me.limits.aiContent ? '' : 'Pro plan feature'}>
+                <Sparkles className="size-4" /> AI plan{client ? ` — ${client.name}` : ''}
               </Button>
             </>
           )
         }
       />
+      <div className="mb-4 flex flex-wrap items-center gap-2">
+        <span className="text-sm font-medium">Client:</span>
+        <button onClick={() => pickClient('')}
+          className={`rounded-full border px-3 py-1 text-sm ${!clientId ? 'border-primary bg-primary text-primary-foreground' : 'hover:bg-muted'}`}>Sab clients</button>
+        {clients?.map((c) => (
+          <button key={c.id} onClick={() => pickClient(c.id)}
+            className={`rounded-full border px-3 py-1 text-sm ${clientId === c.id ? 'border-primary bg-primary text-primary-foreground' : 'hover:bg-muted'}`}>{c.name}</button>
+        ))}
+      </div>
+
       {mode === 'add' && (
         <Panel title="Add content item" className="mb-4">
           <form
@@ -106,7 +135,9 @@ export default function CalendarPage() {
               }
             }}
           >
-            <Field label="Business / topic"><Input required value={ai.topic} onChange={(e) => setAi({ ...ai, topic: e.target.value })} placeholder="Dental clinic in Lucknow" /></Field>
+            <Field label="Business / topic" hint={ai.clientId ? 'Khaali chhod sakte hain — AI client aur uske accounts ka data dekh kar plan banayega' : undefined}>
+              <Input required={!ai.clientId} value={ai.topic} onChange={(e) => setAi({ ...ai, topic: e.target.value })} placeholder="Dental clinic in Lucknow" />
+            </Field>
             <Field label="Client">
               <select className={selectClass} value={ai.clientId} onChange={(e) => setAi({ ...ai, clientId: e.target.value })}>
                 <option value="">—</option>
@@ -125,8 +156,9 @@ export default function CalendarPage() {
                 ))}
               </div>
             </Field>
-            <div className="sm:col-span-2 lg:col-span-5">
+            <div className="flex flex-wrap items-center gap-3 sm:col-span-2 lg:col-span-5">
               <Button type="submit" disabled={busy}><Sparkles className="size-4" /> {busy ? 'Plan ban raha hai… (30-60 sec)' : 'Generate plan'}</Button>
+              <span className="text-xs text-muted-foreground">Dobara banane par isi client ke purane (sirf "Idea" wale) items un dino ke liye badal jayenge.</span>
             </div>
           </form>
         </Panel>
@@ -180,6 +212,7 @@ export default function CalendarPage() {
                             )}
                           </div>
                           <div className="mt-0.5 line-clamp-2">{it.topic}</div>
+                          {!clientId && it.clientName && <div className="mt-0.5 truncate text-[10px] font-semibold text-primary">{it.clientName}</div>}
                         </div>
                       ))}
                     </div>

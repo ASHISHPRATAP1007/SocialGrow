@@ -122,9 +122,32 @@ def analyze_content(body: PostIn, ws: Workspace = Depends(require_ws(ALL_ROLES))
 class CalendarIn(BaseModel):
     clientId: str | None = None
     platforms: list[str]
-    topic: str
+    topic: str = ""
     startDate: str
     days: int = 30
+    replace: bool = True  # regenerate: remove this client's unused AI ideas in the same dates first
+
+
+def _client_context(db: Session, client: Client) -> str:
+    """What this client's own accounts show: platforms, size, best formats and best posts — so the plan fits them."""
+    accounts = db.scalars(select(SocialAccount).where(SocialAccount.client_id == client.id)).all()
+    if not accounts:
+        return ""
+    lines = []
+    for a in accounts:
+        posts = db.scalars(select(Post).where(Post.account_id == a.id).order_by(Post.published_at.desc()).limit(50)).all()
+        if posts:
+            by_fmt: dict[str, list[float]] = {}
+            for p in posts:
+                by_fmt.setdefault(p.format, []).append(post_rate(p, a.followers))
+            fmts = sorted(((f, sum(r) / len(r)) for f, r in by_fmt.items()), key=lambda x: -x[1])
+            top = sorted(posts, key=lambda p: -(p.views or p.likes))[:3]
+            lines.append(f"- {a.platform} @{a.username}: {a.followers or 0} followers; best formats: "
+                         + ", ".join(f"{f} ({r:.1f}% eng.)" for f, r in fmts[:3])
+                         + "; top posts: " + " | ".join(p.title[:60] for p in top))
+        else:
+            lines.append(f"- {a.platform} @{a.username}: {a.followers or 0} followers; no posts yet")
+    return "This client's own accounts (use this to choose formats and themes that already work):\n" + "\n".join(lines)
 
 
 @router.post("/ai/calendar")
@@ -132,14 +155,21 @@ def generate_calendar(body: CalendarIn, ws: Workspace = Depends(require_ws(CONTE
     platforms = [p for p in body.platforms if p in PLATFORMS]
     if not platforms:
         raise ApiError("Kam se kam ek platform chunein.")
+    client = None
     if body.clientId:
-        c = db.get(Client, body.clientId)
-        if not c or c.agency_id != ws.agency.id:
+        client = db.get(Client, body.clientId)
+        if not client or client.agency_id != ws.agency.id:
             raise ApiError("Client nahi mila.", 404)
+    topic = body.topic.strip() or (f"{client.name}" + (f" ({client.company})" if client and client.company else "") if client else "")
+    if not topic:
+        raise ApiError("Business / topic likhein ya client chunein.")
     gate(db, ws, "calendar", "aiContent")
     days = max(7, min(31, round(body.days)))
+    context = _client_context(db, client) if client else ""
     text = llm(
-        f"Create a {days}-day social media content plan starting {body.startDate}.\nBusiness/topic: {body.topic}\nPlatforms: {', '.join(platforms)}\n"
+        f"Create a {days}-day social media content plan starting {body.startDate}.\nBusiness/topic: {topic}\n"
+        + (f"Client: {client.name}\n{context}\n" if client else "")
+        + f"Platforms: {', '.join(platforms)}\n"
         "One item per day. Mix formats (instagram: Reel/Carousel/Story/Image, facebook: Video/Image/Post, youtube: Short/Video).\n"
         f'Return ONLY a JSON array of exactly {days} objects: {{"day": number (1-based), "platform": one of {json.dumps(platforms)}, '
         '"format": string, "topic": string (max 10 words), "notes": string (one line idea)}.')
@@ -148,6 +178,13 @@ def generate_calendar(body: CalendarIn, ws: Workspace = Depends(require_ws(CONTE
     except Exception:
         raise ApiError("AI calendar parse nahi ho paya, dobara try karein.")
     start = parse_date(body.startDate)
+    if body.replace:
+        end = (start + timedelta(days=days - 1)).isoformat()
+        q = select(ContentItem).where(ContentItem.agency_id == ws.agency.id, ContentItem.status == "idea",
+                                      ContentItem.date >= start.isoformat(), ContentItem.date <= end)
+        q = q.where(ContentItem.client_id == client.id) if client else q.where(ContentItem.client_id.is_(None))
+        for old in db.scalars(q).all():
+            db.delete(old)
     count = 0
     for idx, it in enumerate(items[:days]):
         day = it.get("day") if isinstance(it.get("day"), int) else idx + 1
@@ -156,7 +193,7 @@ def generate_calendar(body: CalendarIn, ws: Workspace = Depends(require_ws(CONTE
                            platform=platform, format=str(it.get("format") or "Post")[:30], topic=str(it.get("topic") or "Content idea")[:120],
                            notes=str(it["notes"])[:240] if it.get("notes") else None, status="idea"))
         count += 1
-    notify(db, ws.agency.id, "calendar", f"AI ne {count} content ideas calendar mein add kiye")
+    notify(db, ws.agency.id, "calendar", f"AI ne {count} content ideas{f' ({client.name})' if client else ''} calendar mein add kiye")
     db.commit()
     return {"count": count}
 

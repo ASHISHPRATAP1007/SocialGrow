@@ -329,9 +329,11 @@ class ContentIn(BaseModel):
 
 
 @router.get("/content")
-def list_content(month: str, ws: Workspace = Depends(read_ws), db: Session = Depends(get_db)):
-    items = db.scalars(select(ContentItem).where(ContentItem.agency_id == ws.agency.id, ContentItem.date >= f"{month}-01",
-                                                 ContentItem.date <= f"{month}-31").order_by(ContentItem.date)).all()
+def list_content(month: str, clientId: str | None = None, ws: Workspace = Depends(read_ws), db: Session = Depends(get_db)):
+    q = select(ContentItem).where(ContentItem.agency_id == ws.agency.id, ContentItem.date >= f"{month}-01", ContentItem.date <= f"{month}-31")
+    if clientId:  # one client's calendar
+        q = q.where(ContentItem.client_id == clientId)
+    items = db.scalars(q.order_by(ContentItem.date)).all()
     clients = {c.id: c.name for c in db.scalars(select(Client).where(Client.agency_id == ws.agency.id)).all()}
     return [to_dict(i) | {"clientName": clients.get(i.client_id)} for i in items]
 

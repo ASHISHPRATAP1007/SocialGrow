@@ -469,6 +469,24 @@ class Api(unittest.TestCase):
         self.assertEqual(len(r.json()["options"]), 3)
         self.assertIn("SAME language", lm.call_args[0][0])
 
+    def test_69_calendar_per_client(self):
+        clients = self.get("/clients", self.agency).json()
+        a, b = clients[0]["id"], clients[1]["id"]
+        for cid, topic in ((a, "A post"), (b, "B post")):
+            self.post("/content", self.agency, {"clientId": cid, "date": "2026-11-05", "platform": "instagram", "format": "Reel", "topic": topic})
+        only_a = self.get("/content", self.agency, params={"month": "2026-11", "clientId": a}).json()
+        self.assertEqual([i["topic"] for i in only_a], ["A post"])
+        self.assertEqual(len(self.get("/content", self.agency, params={"month": "2026-11"}).json()), 2)
+        plan = json.dumps([{"day": d, "platform": "instagram", "format": "Reel", "topic": f"Idea {d}", "notes": "n"} for d in range(1, 8)])
+        with mock.patch("app.routers.ai.llm", return_value=plan) as lm:
+            r = self.post("/ai/calendar", self.agency, {"clientId": b, "platforms": ["instagram"], "startDate": "2026-11-01", "days": 7})
+        self.assertEqual(r.json()["count"], 7)
+        prompt = lm.call_args[0][0]
+        self.assertIn("Client:", prompt)  # topic defaults to the client; client context is used
+        items_b = self.get("/content", self.agency, params={"month": "2026-11", "clientId": b}).json()
+        self.assertEqual(len(items_b), 7)  # the old "B post" idea in that week was replaced
+        self.assertEqual(len(self.get("/content", self.agency, params={"month": "2026-11", "clientId": a}).json()), 1)  # A untouched
+
     def test_63_schema_self_updates_on_deploy(self):
         from sqlalchemy import create_engine, inspect, text
         import app.database as database
