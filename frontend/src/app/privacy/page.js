@@ -21,7 +21,9 @@ export default function Privacy() {
         <p>When you or your client connect Facebook, Instagram or YouTube by logging in, we receive read-only access tokens and read
           public profile and performance data of the Pages, Instagram Business accounts and YouTube channels you choose: name, username,
           follower/subscriber counts, posts/videos and their likes, comments, shares and views.</p>
-        <p>We do not receive or store your Facebook or Google password. We never post, delete, send messages or change anything on your accounts.</p>
+        <p>We do not receive or store your Facebook or Google password. We never delete anything or send messages. For YouTube channels
+          connected with Google, the agency managing your channel can reply to comments from inside SocialGrow — only when a team member
+          writes and sends that reply; nothing is posted automatically.</p>
       </S>
       <S title="How we use it">
         <p>Only to show analytics, growth charts, AI insights and reports inside your SocialGrow workspace, and to send service emails

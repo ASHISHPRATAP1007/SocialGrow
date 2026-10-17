@@ -8,7 +8,9 @@ from ..core.lib import ApiError
 
 AUTH = "https://accounts.google.com/o/oauth2/v2/auth"
 TOKEN = "https://oauth2.googleapis.com/token"
-SCOPE = "https://www.googleapis.com/auth/youtube.readonly"
+# readonly for analytics + force-ssl so the agency can reply to comments from inside SocialGrow
+SCOPE = "https://www.googleapis.com/auth/youtube.readonly https://www.googleapis.com/auth/youtube.force-ssl"
+WRITE_SCOPE = "https://www.googleapis.com/auth/youtube.force-ssl"
 
 
 def oauth_url(client_id: str, redirect_uri: str, state: str) -> str:

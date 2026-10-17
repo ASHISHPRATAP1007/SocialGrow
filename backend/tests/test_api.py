@@ -382,10 +382,29 @@ class Api(unittest.TestCase):
         self.assertEqual(ov["quietAccounts"][0]["lastPostAt"], "2025-08-13")
         post_id = d["posts"][0]["id"]
         with mock.patch("app.routers.analytics.google_access_token", return_value="tok"), \
-             mock.patch("app.routers.analytics.fetch_comments", return_value=[{"author": "A", "text": "Nice", "likes": 1, "replies": 0, "publishedAt": "2025-08-14"}]) as fc:
-            r = self.get(f"/posts/{post_id}/comments", self.agency)
-        self.assertEqual(r.json()[0]["text"], "Nice")
-        self.assertEqual(fc.call_args[0], ("vid1", "oauth:tok"))
+             mock.patch("app.routers.analytics.fetch_comments", return_value={"items": [{"id": "c1", "text": "Nice"}], "nextPageToken": None}) as fc:
+            r = self.get(f"/posts/{post_id}/comments", self.agency, params={"order": "time"})
+        self.assertEqual(r.json()["items"][0]["text"], "Nice")
+        self.assertEqual(fc.call_args[0], ("vid1", "oauth:tok", None, "time"))
+        # replying needs the comment permission — the old (read-only) Google login is refused with a clear message
+        r = self.post(f"/posts/{post_id}/comments", self.agency, {"text": "Thanks!", "parentId": "c1"})
+        self.assertEqual(r.status_code, 400)
+        self.assertIn("dobara jodein", r.json()["detail"])
+        # after reconnecting with the new scope, replies go out as the channel
+        from app.models import Integration
+        with S() as db:
+            row = db.query(Integration).filter(Integration.agency_id == self._agency_id(self.agency)).one()
+            row.google_channels = {k: {**v, "scope": "https://www.googleapis.com/auth/youtube.force-ssl"} for k, v in row.google_channels.items()}
+            db.commit()
+        with mock.patch("app.routers.analytics.google_access_token", return_value="tok"), \
+             mock.patch("app.routers.analytics.post_reply", return_value={"id": "r1", "text": "Thanks!"}) as pr, \
+             mock.patch("app.routers.analytics.fetch_video", return_value={"id": "vid1", "title": "Old video"}):
+            r = self.post(f"/posts/{post_id}/comments", self.agency, {"text": "Thanks!", "parentId": "c1"})
+            self.assertEqual(r.json()["id"], "r1")
+            pr.assert_called_with("c1", "Thanks!", "tok")
+            self.assertTrue(self.get(f"/posts/{post_id}/video", self.agency).json()["canReply"])
+        viewer = self.client.post(f"{API}/auth/login", json={"email": "viewer@test.dev", "password": PW}).json()["accessToken"]
+        self.assertEqual(self.post(f"/posts/{post_id}/comments", {"Authorization": f"Bearer {viewer}"}, {"text": "x", "parentId": "c1"}).status_code, 403)
 
     def test_63_schema_self_updates_on_deploy(self):
         from sqlalchemy import create_engine, inspect, text

@@ -1,6 +1,7 @@
 'use client'
 
 import { useState } from 'react'
+import Link from 'next/link'
 import { toast } from 'sonner'
 import { Sparkles, X } from 'lucide-react'
 import { api, refreshAll } from '@/lib/api'
@@ -92,7 +93,9 @@ export default function PostsPage() {
                 <span className="text-xs text-muted-foreground">{niceDate(p.publishedAt)}</span>
               </div>
               <div className="mt-2 font-semibold">
-                {p.url ? <a href={p.url} target="_blank" rel="noreferrer" className="hover:text-primary hover:underline">{p.title}</a> : p.title}
+                {p.platform === 'youtube' && p.live
+                  ? <Link href={`/post?id=${p.id}`} className="hover:text-primary hover:underline">▶ {p.title}</Link>
+                  : p.url ? <a href={p.url} target="_blank" rel="noreferrer" className="hover:text-primary hover:underline">{p.title}</a> : p.title}
               </div>
               <div className="text-xs text-muted-foreground">@{p.username} · {p.format}{p.live ? ' · live' : ''}</div>
               <div className="mt-3 grid grid-cols-4 gap-1 text-center">

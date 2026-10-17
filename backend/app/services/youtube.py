@@ -94,19 +94,69 @@ def fetch_youtube(raw: str, key: str) -> dict:
     }
 
 
-def fetch_comments(video_id: str, key: str, limit: int = 20) -> list[dict]:
-    """Top public comments of a video (read-only)."""
+def _comment(c: dict, cid: str) -> dict:
+    sn = c["snippet"]
+    return {"id": cid, "author": sn.get("authorDisplayName"), "authorImage": sn.get("authorProfileImageUrl"),
+            "authorChannelUrl": sn.get("authorChannelUrl"), "text": sn.get("textOriginal") or sn.get("textDisplay") or "",
+            "likes": _num(sn.get("likeCount")), "publishedAt": (sn.get("publishedAt") or "")[:16].replace("T", " ")}
+
+
+def fetch_comments(video_id: str, key: str, page_token: str | None = None, order: str = "relevance") -> dict:
+    """One page (up to 50) of comment threads with the first replies. Read-only."""
+    params = {"part": "snippet,replies", "videoId": video_id, "maxResults": "50", "order": order if order in ("relevance", "time") else "relevance",
+              "textFormat": "plainText"}
+    if page_token:
+        params["pageToken"] = page_token
     try:
-        data = _yt("commentThreads", {"part": "snippet", "videoId": video_id, "maxResults": str(limit), "order": "relevance",
-                                      "textFormat": "plainText"}, key)
+        data = _yt("commentThreads", params, key)
     except ApiError as e:
         if "disabled comments" in str(e.detail).lower():
-            return []
+            return {"items": [], "nextPageToken": None, "disabled": True}
         raise
-    out = []
+    items = []
     for t in data.get("items", []):
-        c = t["snippet"]["topLevelComment"]["snippet"]
-        out.append({"author": c.get("authorDisplayName"), "text": c.get("textDisplay") or c.get("textOriginal") or "",
-                    "likes": _num(c.get("likeCount")), "replies": _num(t["snippet"].get("totalReplyCount")),
-                    "publishedAt": (c.get("publishedAt") or "")[:10]})
-    return out
+        top = t["snippet"]["topLevelComment"]
+        items.append({**_comment(top, top["id"]), "threadId": t["id"], "replyCount": _num(t["snippet"].get("totalReplyCount")),
+                      "replies": [_comment(r, r["id"]) for r in (t.get("replies") or {}).get("comments", [])][::-1]})
+    return {"items": items, "nextPageToken": data.get("nextPageToken"), "disabled": False}
+
+
+def fetch_replies(parent_id: str, key: str) -> list[dict]:
+    data = _yt("comments", {"part": "snippet", "parentId": parent_id, "maxResults": "100", "textFormat": "plainText"}, key)
+    return [_comment(c, c["id"]) for c in data.get("items", [])]
+
+
+def fetch_video(video_id: str, key: str) -> dict:
+    items = _yt("videos", {"part": "snippet,statistics,contentDetails", "id": video_id}, key).get("items") or []
+    if not items:
+        raise ApiError("Video nahi mili (shayad delete ya private ho gayi).")
+    v = items[0]
+    st = v.get("statistics", {})
+    return {"id": v["id"], "title": v["snippet"]["title"], "description": v["snippet"].get("description", ""),
+            "publishedAt": v["snippet"]["publishedAt"][:10], "channelTitle": v["snippet"].get("channelTitle"),
+            "thumbnail": ((v["snippet"].get("thumbnails") or {}).get("high") or {}).get("url"),
+            "views": _num(st.get("viewCount")), "likes": _num(st.get("likeCount")), "comments": _num(st.get("commentCount")),
+            "durationSeconds": _duration_seconds(v["contentDetails"].get("duration", "")),
+            "url": f"https://www.youtube.com/watch?v={v['id']}"}
+
+
+def _post(path: str, body: dict, token: str) -> dict:
+    r = httpx.post(f"https://www.googleapis.com/youtube/v3/{path}", params={"part": "snippet"}, json=body,
+                   headers={"Authorization": f"Bearer {token}"}, timeout=30)
+    data = r.json()
+    if r.status_code >= 400 or data.get("error"):
+        raise ApiError(f"YouTube: {data.get('error', {}).get('message', r.reason_phrase)}")
+    return data
+
+
+def post_reply(parent_id: str, text: str, token: str) -> dict:
+    """Reply to a comment as the connected channel."""
+    c = _post("comments", {"snippet": {"parentId": parent_id, "textOriginal": text}}, token)
+    return _comment(c, c["id"])
+
+
+def post_comment(video_id: str, text: str, token: str) -> dict:
+    """New top-level comment on a video as the connected channel."""
+    t = _post("commentThreads", {"snippet": {"videoId": video_id, "topLevelComment": {"snippet": {"textOriginal": text}}}}, token)
+    top = t["snippet"]["topLevelComment"]
+    return {**_comment(top, top["id"]), "threadId": t["id"], "replyCount": 0, "replies": []}

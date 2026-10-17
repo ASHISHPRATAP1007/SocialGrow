@@ -311,7 +311,8 @@ def google_callback(code: str | None = None, state: str | None = None, error: st
         for c in channels:
             prev = merged.get(c["id"], {})
             merged[c["id"]] = {"title": c["title"], "handle": c["handle"],
-                               "refreshToken": tok.get("refresh_token") or prev.get("refreshToken")}
+                               "refreshToken": tok.get("refresh_token") or prev.get("refreshToken"),
+                               "scope": tok.get("scope") or prev.get("scope") or ""}
         row.google_channels = merged
         row.updated_at = epoch_ms()
         for acc in db.scalars(select(SocialAccount).where(SocialAccount.agency_id == agency_id, SocialAccount.platform == "youtube",

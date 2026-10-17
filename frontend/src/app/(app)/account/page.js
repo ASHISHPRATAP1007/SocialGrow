@@ -22,51 +22,28 @@ export default function AccountPage() {
 
 const LABEL = { youtube: ['Subscribers', 'Videos'], instagram: ['Followers', 'Posts'], facebook: ['Followers', 'Posts'] }
 
-function Comments({ post }) {
-  const { data, error } = useApi(`/posts/${post.id}/comments`)
-  if (error) return <p className="text-xs text-destructive">{errMsg(error)}</p>
-  if (!data) return <Loading label="Comments aa rahe hain…" />
-  if (!data.length) return <p className="text-xs text-muted-foreground">Is video par koi comment nahi (ya comments band hain).</p>
+function PostRow({ p, internal }) {
+  const title = internal
+    ? <Link href={`/post?id=${p.id}`} className="font-medium hover:text-primary hover:underline">▶ {p.title}</Link>
+    : p.url ? <a href={p.url} target="_blank" rel="noreferrer" className="font-medium hover:text-primary hover:underline">{p.title}</a> : <span className="font-medium">{p.title}</span>
   return (
-    <div className="space-y-2">
-      {data.map((c, i) => (
-        <div key={i} className="rounded-md bg-muted/50 p-2 text-sm">
-          <div className="text-xs font-semibold">{c.author} <span className="font-normal text-muted-foreground">· {c.publishedAt}</span></div>
-          <div className="mt-0.5 whitespace-pre-line">{c.text}</div>
-          <div className="mt-1 text-[11px] text-muted-foreground">👍 {c.likes} · {c.replies} replies</div>
-        </div>
-      ))}
-    </div>
-  )
-}
-
-function PostRow({ p, commentsSupported }) {
-  const [open, setOpen] = useState(false)
-  return (
-    <>
-      <tr className="border-t align-top">
-        <td className="py-2.5 pr-3">
-          {p.url ? <a href={p.url} target="_blank" rel="noreferrer" className="font-medium hover:text-primary hover:underline">{p.title}</a> : <span className="font-medium">{p.title}</span>}
-          <div className="text-[11px] text-muted-foreground">{niceDate(p.publishedAt)} · {p.format}</div>
-        </td>
-        <td className="px-2 text-right">{fmt(p.views)}</td>
-        <td className="px-2 text-right">{fmt(p.likes)}</td>
-        <td className="px-2 text-right">
-          {commentsSupported && p.comments > 0 ? (
-            <button className="inline-flex items-center gap-1 text-primary hover:underline" onClick={() => setOpen((o) => !o)}>
-              <MessageSquare className="size-3.5" /> {fmt(p.comments)}
-            </button>
-          ) : fmt(p.comments)}
-        </td>
-        <td className="px-2 text-right">{fmt(p.shares)}</td>
-        <td className="pl-2 text-right">{p.engagementRate.toFixed(2)}%</td>
-      </tr>
-      {open && (
-        <tr>
-          <td colSpan={6} className="pb-3"><Comments post={p} /></td>
-        </tr>
-      )}
-    </>
+    <tr className="border-t align-top">
+      <td className="py-2.5 pr-3">
+        {title}
+        <div className="text-[11px] text-muted-foreground">{niceDate(p.publishedAt)} · {p.format}</div>
+      </td>
+      <td className="px-2 text-right">{fmt(p.views)}</td>
+      <td className="px-2 text-right">{fmt(p.likes)}</td>
+      <td className="px-2 text-right">
+        {internal ? (
+          <Link href={`/post?id=${p.id}`} className="inline-flex items-center gap-1 text-primary hover:underline">
+            <MessageSquare className="size-3.5" /> {fmt(p.comments)}
+          </Link>
+        ) : fmt(p.comments)}
+      </td>
+      <td className="px-2 text-right">{fmt(p.shares)}</td>
+      <td className="pl-2 text-right">{p.engagementRate.toFixed(2)}%</td>
+    </tr>
   )
 }
 
@@ -198,7 +175,8 @@ function AccountView() {
                   {list.map((p, i) => (
                     <li key={p.id} className="flex items-start justify-between gap-3">
                       <span className="min-w-0"><b className="mr-1 text-muted-foreground">{i + 1}.</b>
-                        {p.url ? <a href={p.url} target="_blank" rel="noreferrer" className="hover:text-primary hover:underline">{p.title}</a> : p.title}
+                        {data.commentsSupported ? <Link href={`/post?id=${p.id}`} className="hover:text-primary hover:underline">{p.title}</Link>
+                          : p.url ? <a href={p.url} target="_blank" rel="noreferrer" className="hover:text-primary hover:underline">{p.title}</a> : p.title}
                         <span className="ml-1 text-[11px] text-muted-foreground">{niceDate(p.publishedAt)}</span>
                       </span>
                       <span className="shrink-0 font-semibold">{val(p)}</span>
@@ -210,14 +188,14 @@ function AccountView() {
           </div>
 
           <Panel title={`Saari ${pLabel.toLowerCase()} (${data.posts.length})`} className="mt-4">
-            {data.commentsSupported && <p className="-mt-1 mb-2 text-xs text-muted-foreground">Comments ki ginti par click karke asli comments padhein.</p>}
+            {data.commentsSupported && <p className="-mt-1 mb-2 text-xs text-muted-foreground">Video par click karein — wahin play hogi, saare comments dikhenge, reply aur share kar sakte hain.</p>}
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead className="text-left text-xs text-muted-foreground uppercase">
                   <tr><th className="py-2">Post</th><th className="px-2 text-right">Views</th><th className="px-2 text-right">Likes</th><th className="px-2 text-right">Comments</th><th className="px-2 text-right">Shares</th><th className="pl-2 text-right">Eng.</th></tr>
                 </thead>
                 <tbody>
-                  {posts.map((p) => <PostRow key={p.id} p={p} commentsSupported={data.commentsSupported} />)}
+                  {posts.map((p) => <PostRow key={p.id} p={p} internal={data.commentsSupported} />)}
                 </tbody>
               </table>
             </div>
