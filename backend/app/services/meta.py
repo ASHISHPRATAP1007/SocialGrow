@@ -173,8 +173,9 @@ FB_C_FIELDS = "id,from{name,picture},message,created_time,like_count,comment_cou
 
 
 def fb_comments(post_id: str, token: str, after: str | None = None, order: str = "relevance") -> dict:
-    params = {"fields": FB_C_FIELDS, "filter": "toplevel", "limit": "50", "access_token": token,
-              "order": "reverse_chronological" if order == "time" else "ranked"}
+    params = {"fields": FB_C_FIELDS, "filter": "toplevel", "limit": "50", "access_token": token}
+    if order == "time":  # newest first; default ("Top") lets Facebook choose its own order
+        params["order"] = "reverse_chronological"
     if after:
         params["after"] = after
     data = graph_get(f"{post_id}/comments", params)
