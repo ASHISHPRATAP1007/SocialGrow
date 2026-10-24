@@ -68,16 +68,22 @@ def _gemini(prompt: str, temperature: float) -> str:
     models = list(dict.fromkeys([m for m in [_models_cache["names"][0] if _models_cache["names"] else None, settings.GEMINI_MODEL] if m]))
     last = "AI service abhi busy hai"
     discovered = False
+    started = time.time()
     i = 0
     while i < len(models) and i < 6:
         model = models[i]
         i += 1
         url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
         try:
-            r = httpx.post(url, headers={"x-goog-api-key": key}, timeout=60, json=body)
+            r = httpx.post(url, headers={"x-goog-api-key": key}, timeout=httpx.Timeout(45, connect=10), json=body)
         except httpx.HTTPError as e:
             log.warning("gemini %s network error: %s", model, type(e).__name__)
             last = "AI se connect nahi ho paya"
+            if not discovered:  # slow / unreachable model → try lighter ones too
+                discovered = True
+                models += [m for m in sorted(_discover_models(key), key=lambda n: "lite" not in n) if m not in models]
+            if time.time() - started > 75:
+                break
             continue
         if r.status_code == 200:
             data = r.json()
@@ -99,50 +105,96 @@ def _gemini(prompt: str, temperature: float) -> str:
         for name in suggested:
             if name != model and name not in models:
                 models.insert(i, name)
-        if r.status_code == 404 and not discovered:
+        if r.status_code in (404, 429, 500, 503) and not discovered:
             discovered = True
             _models_cache["at"] = 0.0
-            models += [m for m in _discover_models(key) if m not in models]
+            found = _discover_models(key)
+            if r.status_code != 404:  # overloaded / rate-limited → prefer the light models next
+                found = sorted(found, key=lambda n: "lite" not in n)
+            models += [m for m in found if m not in models]
         last = "AI ki free limit abhi poori ho gayi, 1 minute baad try karein" if r.status_code == 429 else f"AI busy ({r.status_code})"
-        if r.status_code in (429, 500, 503) and i == 1:
-            time.sleep(1.5)
+        if time.time() - started > 75:
+            break
     raise ApiError(f"{last}. Thodi der baad dobara try karein.")
 
 
-def _openai(prompt: str, temperature: float) -> str:
-    if not settings.OPENAI_API_KEY:
-        raise ApiError("AI abhi set nahi hai (OPENAI_API_KEY missing).")
-    r = httpx.post("https://api.openai.com/v1/chat/completions", timeout=90,
-                   headers={"Authorization": f"Bearer {settings.OPENAI_API_KEY}"},
-                   json={"model": settings.OPENAI_MODEL, "temperature": temperature,
+def _chat_compatible(name: str, url: str, key: str | None, model: str, prompt: str, temperature: float,
+                     extra_headers: dict | None = None) -> str:
+    """OpenAI-style chat API (OpenAI, Groq, OpenRouter)."""
+    if not key:
+        raise ApiError(f"{name} key set nahi hai.")
+    r = httpx.post(url, timeout=httpx.Timeout(45, connect=10),
+                   headers={"Authorization": f"Bearer {key.strip()}", **(extra_headers or {})},
+                   json={"model": model, "temperature": temperature,
                          "messages": [{"role": "system", "content": SYSTEM}, {"role": "user", "content": prompt}]})
-    r.raise_for_status()
+    if r.status_code >= 400:
+        try:
+            msg = r.json().get("error", {}).get("message") or r.reason_phrase
+        except ValueError:
+            msg = r.reason_phrase
+        raise ApiError(f"{name}: {str(msg)[:160]}")
     return r.json()["choices"][0]["message"]["content"] or ""
+
+
+def _openai(prompt: str, temperature: float) -> str:
+    return _chat_compatible("OpenAI", "https://api.openai.com/v1/chat/completions", settings.OPENAI_API_KEY,
+                            settings.OPENAI_MODEL, prompt, temperature)
+
+
+def _groq(prompt: str, temperature: float) -> str:
+    return _chat_compatible("Groq", "https://api.groq.com/openai/v1/chat/completions", settings.GROQ_API_KEY,
+                            settings.GROQ_MODEL, prompt, temperature)
+
+
+def _openrouter(prompt: str, temperature: float) -> str:
+    return _chat_compatible("OpenRouter", "https://openrouter.ai/api/v1/chat/completions", settings.OPENROUTER_API_KEY,
+                            settings.OPENROUTER_MODEL, prompt, temperature,
+                            {"HTTP-Referer": settings.FRONTEND_URL, "X-Title": "SocialGrow AI"})
 
 
 def _anthropic(prompt: str, temperature: float) -> str:
     if not settings.ANTHROPIC_API_KEY:
-        raise ApiError("AI abhi set nahi hai (ANTHROPIC_API_KEY missing).")
-    r = httpx.post("https://api.anthropic.com/v1/messages", timeout=90,
-                   headers={"x-api-key": settings.ANTHROPIC_API_KEY, "anthropic-version": "2023-06-01"},
+        raise ApiError("Anthropic key set nahi hai.")
+    r = httpx.post("https://api.anthropic.com/v1/messages", timeout=httpx.Timeout(45, connect=10),
+                   headers={"x-api-key": settings.ANTHROPIC_API_KEY.strip(), "anthropic-version": "2023-06-01"},
                    json={"model": settings.ANTHROPIC_MODEL, "max_tokens": 2000, "temperature": temperature, "system": SYSTEM,
                          "messages": [{"role": "user", "content": prompt}]})
-    r.raise_for_status()
+    if r.status_code >= 400:
+        raise ApiError(f"Anthropic: {r.reason_phrase}")
     return "".join(b.get("text", "") for b in r.json().get("content", []) if b.get("type") == "text")
 
 
+PROVIDERS = {"gemini": (_gemini, "GEMINI_API_KEY"), "groq": (_groq, "GROQ_API_KEY"), "openrouter": (_openrouter, "OPENROUTER_API_KEY"),
+             "openai": (_openai, "OPENAI_API_KEY"), "anthropic": (_anthropic, "ANTHROPIC_API_KEY")}
+
+
+def provider_chain() -> list[str]:
+    """The chosen provider first, then every other provider that has a key — so one AI being down never stops the app."""
+    first = settings.AI_PROVIDER if settings.AI_PROVIDER in PROVIDERS else "gemini"
+    rest = [n for n in PROVIDERS if n != first and getattr(settings, PROVIDERS[n][1], None)]
+    return [first, *rest]
+
+
 def llm(prompt: str, temperature: float = 0.5) -> str:
-    provider = {"openai": _openai, "anthropic": _anthropic}.get(settings.AI_PROVIDER, _gemini)
-    try:
-        text = provider(prompt, temperature)
-    except ApiError:
-        raise
-    except Exception as e:  # network / provider error
-        log.warning("llm provider error: %s", type(e).__name__)
-        raise ApiError("AI service abhi busy hai, thodi der baad try karein.") from e
-    if not text.strip():
-        raise ApiError("AI se response nahi mila, thodi der baad try karein.")
-    return text.strip()
+    errors = []
+    for name in provider_chain():
+        fn, _ = PROVIDERS[name]
+        try:
+            text = fn(prompt, temperature)
+        except ApiError as e:
+            log.warning("llm %s failed: %s", name, str(e.detail)[:200])
+            errors.append(str(e.detail))
+            continue
+        except Exception as e:  # network / unexpected provider error
+            log.warning("llm %s error: %s", name, type(e).__name__)
+            errors.append(f"{name} se connect nahi ho paya")
+            continue
+        if text and text.strip():
+            return text.strip()
+        errors.append(f"{name} ne khaali jawab diya")
+    if len(errors) == 1:
+        raise ApiError(errors[0])
+    raise ApiError("Koi bhi AI abhi jawab nahi de paya — 1-2 minute baad dobara try karein.")
 
 
 def parse_json(text: str):

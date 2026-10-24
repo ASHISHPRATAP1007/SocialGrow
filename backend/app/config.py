@@ -41,6 +41,11 @@ class Settings:
     OPENAI_MODEL = env("OPENAI_MODEL", "gpt-4o-mini")
     ANTHROPIC_API_KEY = env("ANTHROPIC_API_KEY")
     ANTHROPIC_MODEL = env("ANTHROPIC_MODEL", "claude-haiku-4-5")
+    # Free backups — if the main AI fails, SocialGrow tries these automatically (only those with a key)
+    GROQ_API_KEY = env("GROQ_API_KEY")
+    GROQ_MODEL = env("GROQ_MODEL", "llama-3.3-70b-versatile")
+    OPENROUTER_API_KEY = env("OPENROUTER_API_KEY")
+    OPENROUTER_MODEL = env("OPENROUTER_MODEL", "openrouter/free")
 
     # Email (password reset codes) — any SMTP, e.g. Gmail with an App Password
     SMTP_HOST = env("SMTP_HOST")
