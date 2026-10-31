@@ -1,9 +1,11 @@
-# Render Blueprint — free FastAPI backend. Render dashboard → New → Blueprint → select this repo.
+# Render Blueprint — free FastAPI backend.
+# Render dashboard → New → Blueprint → choose this repo → fill the values it asks for → Apply.
 services:
   - type: web
     name: socialgrow-api
     runtime: python
     plan: free
+    region: singapore
     rootDir: backend
     buildCommand: pip install -r requirements.txt
     startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
@@ -11,19 +13,17 @@ services:
     envVars:
       - key: PYTHON_VERSION
         value: 3.12.7
-      - key: DATABASE_URL
+      - key: DATABASE_URL        # Neon connection string
         sync: false
+      - key: FRONTEND_URL        # the Vercel website address, e.g. https://socialgrow-app.vercel.app
+        sync: false
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: GROQ_API_KEY        # free backup AI (console.groq.com/keys) — optional
+        sync: false
+      - key: AI_PROVIDER
+        value: gemini
       - key: JWT_SECRET
         generateValue: true
       - key: CRON_SECRET
         generateValue: true
-      - key: CORS_ORIGINS
-        sync: false
-      - key: PUBLIC_API_URL
-        sync: false
-      - key: AI_PROVIDER
-        value: gemini
-      - key: GEMINI_API_KEY
-        sync: false
-      - key: GROQ_API_KEY
-        sync: false

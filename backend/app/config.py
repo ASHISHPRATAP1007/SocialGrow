@@ -28,10 +28,12 @@ class Settings:
     DATABASE_URL = env("DATABASE_URL", "sqlite:///./socialgrow.db")
     JWT_SECRET = env("JWT_SECRET", "dev-only-insecure-secret-change-me-in-production")
     JWT_EXPIRE_DAYS = int(env("JWT_EXPIRE_DAYS", "7"))
-    # Comma separated list of allowed frontend origins, e.g. https://socialgrow.vercel.app
-    CORS_ORIGINS = [o.strip() for o in env("CORS_ORIGINS", "http://localhost:3000").split(",") if o.strip()]
-    PUBLIC_API_URL = env("PUBLIC_API_URL", "http://localhost:8000")
-    FRONTEND_URL = env("FRONTEND_URL", "http://localhost:3000")
+    # The website's address (Vercel). Also the default allowed CORS origin.
+    FRONTEND_URL = env("FRONTEND_URL", "http://localhost:3000").rstrip("/")
+    # Comma separated list of allowed frontend origins; defaults to FRONTEND_URL
+    CORS_ORIGINS = [o.strip().rstrip("/") for o in env("CORS_ORIGINS", FRONTEND_URL).split(",") if o.strip()]
+    # This API's public address — on Render it is detected automatically (RENDER_EXTERNAL_URL)
+    PUBLIC_API_URL = (env("PUBLIC_API_URL") or env("RENDER_EXTERNAL_URL") or "http://localhost:8000").rstrip("/")
 
     # AI: gemini (free tier) | openai | anthropic
     AI_PROVIDER = env("AI_PROVIDER", "gemini").lower()
